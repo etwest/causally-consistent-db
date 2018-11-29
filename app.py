@@ -14,16 +14,43 @@ import threading
 import collections
 
 app = Flask(__name__)
-
 # global variables
+
 store = {}
 MB = 1000000
 IP_PORT = os.getenv('IP_PORT')
 VIEW = set(os.getenv('VIEW').split(','))
+SERVER_COUNT = os.getenv('S')
+
+
+#####################################################################
+###################           Classes           #####################
+##################################################################### 
+
+class gossip_thread(Thread):
+    stopped = False
+
+    def __init__(self):
+        Thread.__init__(self)
+        self.daemon = True
+
+    def run(self):
+        # gossip every 125 milliseconds
+        while not self.stopped:
+            time.sleep(.2)                                       # sleep for 200 milliseconds
+            temp_view = VIEW.copy()
+            if len(temp_view) > 1:
+                temp_view.remove(IP_PORT)                        # remove self from view temporarily
+                gossip_process_port = sample(temp_view, 1)[0]    # choose random process to gossip to
+                try:
+                    r = requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON()}, timeout=.5)
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    pass
+
 
 class entry:
     value = ""
-    payload = {} #The Vector Clock for this variable
+    payload = {} # The Vector Clock for this variable
     timestamp = 0
 
     # This constructor takes a timestamp if given and creates a new entry with the same timestamp
@@ -47,6 +74,7 @@ class entry:
             else:
                 secGreater = False
         return firstGreater, secGreater
+        
     # Class Function: Takes takes 1 payload
     # returns 0 if payload is equal to current payload
     # returns 1 if payload is newer
@@ -122,14 +150,10 @@ def compare_stores(other):
             if (VC_compare == 1):
                 store[key] = entry(value['value'], value['payload'], value['timestamp'])
 
-# def set_store(other):
-#     if not other:
-#         other = {}
-#     else:
-#         other = json.loads(other)
-#     for key, value in other.items():
-#         timestamp = datetime.datetime.strptime(value['timestamp'], '%Y-%m-%d %H:%M:%S.%f')
-#         store[key] = entry(value['value'], value['payload'], timestamp)
+
+#####################################################################
+###################       Server Resources      #####################
+#####################################################################
 
 # fetches value of key
 @app.route('/keyValue-store/<key>', methods=['GET'])
@@ -194,10 +218,7 @@ def kvs_put(key):
     clientVC = {}
     clientDict = {}
     payload = {}
-    # if not(flask_request.values.get('payload')):
 
-    # would need to compare causal history of current process
-    # versus payload to ensure no causal vioa
     # This code is for extracting the minimum version of the client's request
     if flask_request.values.get('payload'):
         payload = flask_request.values.get('payload')
@@ -227,8 +248,6 @@ def kvs_put(key):
         response.headers['Content-Type'] = 'application/json'
         return response
 
-    # need to update the clock and payload.
-
     # key already exists; update the value
     if (key in store) and (store[key].value != None):
         store[key].value = value
@@ -245,21 +264,13 @@ def kvs_put(key):
         entry_payload = {IP_PORT:0}
 
         store[key] = entry(value, entry_payload)
-
-        #print("new key-> key:", key, "value:",store[key].value, "entry_payload:", store[key].payload, "ts:", store[key].timestamp)
-
         clientDict[key] = entry_payload
 
         response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': clientDict}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response
 
-
-# TODO: FINISH THIS OMEGALUL
-# WHAT IS THERE TO DO THOUGH?
-# WHO KNOWS AHAHAHAAHAHAHAHA
-# POMEGRANATE TEA IS TOO GOOD 
-# ????????????????????????????    
+    
 @app.route('/keyValue-store/<key>', methods=['DELETE'])
 def kvs_delete(key):
     clientVC = {}
@@ -287,6 +298,17 @@ def kvs_delete(key):
         response.headers['Content-Type'] = 'application/json'
         return response
 
+#####################################################################
+######################          Shard        ########################
+##################################################################### 
+
+@app.route('/shard/my_id', methods=['GET'])
+def shard_get_id():
+    # return this one's id
+
+@app.route('/shard/all_ids', methods=['GET'])
+def shard_get_all():
+    # return all id's
 
 #####################################################################
 ###################          View Stuff         #####################
@@ -294,7 +316,6 @@ def kvs_delete(key):
 
 @app.route('/view', methods=['GET'])
 def view_get():
-    #TODO: don't need to sort VIEW, only did it for testing
     temp_view = VIEW.copy()
     response = make_response(jsonify({'view': ','.join(sorted(temp_view))}), 200)
     response.headers['Content-Type'] = 'application/json'
@@ -357,10 +378,10 @@ def view_delete():
         response.headers['Content-Type'] = 'application/json'
         return response
 
+
 #####################################################################
 ######################          ACK         #########################
 #####################################################################
-
 
 # ack view update request
 @app.route('/view/update/ack', methods=['PUT'])
@@ -382,6 +403,10 @@ def view_delete_ack():
     response.headers['Content-Type'] = 'text/plain'
     return response
 
+def hash(value):
+    return value % 69 + 420
+
+
 #####################################################################
 ######################        GOSSIP        #########################
 #####################################################################
@@ -391,31 +416,9 @@ def view_delete_ack():
 def gossip():
     compare_stores(flask_request.values.get('cur_store'))
     response = make_response(jsonify({'result':"Gossip success"}), 200)
-    # response = make_response(jsonify({'result':"Gossip success", 'cur_store':store_to_JSON()}), 200)
     response.headers['Content-Type'] = 'application/json'
     return response
 
-class gossip_thread(Thread):
-    stopped = False
-
-    def __init__(self):
-        Thread.__init__(self)
-        self.daemon = True
-
-    def run(self):
-        # gossip every 125 milliseconds
-        while not self.stopped:
-            time.sleep(.2)                                     # sleep for 200 milliseconds
-            temp_view = VIEW.copy()
-            if len(temp_view) > 1:
-                temp_view.remove(IP_PORT)                        # remove self from view temporarily
-                gossip_process_port = sample(temp_view, 1)[0]       # choose random process to gossip to
-                try:
-                    r = requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON()}, timeout=.5)
-                    # print(r.json())
-                    # set_store(r.json()['cur_store'])
-                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                    pass
 
 #####################################################################
 ######################          MAIN        #########################
