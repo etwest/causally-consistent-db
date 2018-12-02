@@ -14,20 +14,22 @@ import threading
 import collections
 
 app = Flask(__name__)
-# global variables
 
-store = {}
+# global variables
 MB = 1000000
 IP_PORT = os.getenv('IP_PORT')
 VIEW = set(os.getenv('VIEW').split(','))
-SERVER_COUNT = os.getenv('S')
+SHARD_COUNT = os.getenv('S')
+
+store = {}
+shards = [[] for _ in range(SHARD_COUNT)]
 
 
 #####################################################################
 ###################           Classes           #####################
 ##################################################################### 
 
-class gossip_thread(Thread):
+class Gossip_thread(Thread):
     stopped = False
 
     def __init__(self):
@@ -48,7 +50,7 @@ class gossip_thread(Thread):
                     pass
 
 
-class entry:
+class Entry:
     value = ""
     payload = {} # The Vector Clock for this variable
     timestamp = 0
@@ -74,16 +76,14 @@ class entry:
             else:
                 secGreater = False
         return firstGreater, secGreater
-        
     # Class Function: Takes takes 1 payload
     # returns 0 if payload is equal to current payload
     # returns 1 if payload is newer
     # returns -1 if payload is older                                                     
+
     def compare_to(self, new_payload):
         current_to_new = self.dict_compare_to(self.payload,new_payload)
         new_to_current = self.dict_compare_to(new_payload,self.payload)
-        # print(current_to_new)
-        # print(new_to_current)
 
         if current_to_new[0] and current_to_new[1] and new_to_current[0] and new_to_current[1]: # incomparable
             return 0
@@ -147,7 +147,7 @@ def compare_stores(other):
 
             # if we won, do nothing.
             # if they won, copy the value into our store.
-            if (VC_compare == 1):
+            if VC_compare == 1:
                 store[key] = entry(value['value'], value['payload'], value['timestamp'])
 
 
@@ -158,157 +158,186 @@ def compare_stores(other):
 # fetches value of key
 @app.route('/keyValue-store/<key>', methods=['GET'])
 def kvs_get(key):
-    clientVC = {}
-    clientDict = {}
-    payload = ""
+    if not waiting:
+        clientVC = {}
+        clientDict = {}
+        payload = ""
 
-    # This code is for extracting the minimum version of the client's request
-    if flask_request.values.get('payload'):
-        payload = flask_request.values.get('payload')
-        clientDict = json.loads(payload)
-        try:
-            clientVC = clientDict[key]
-        except:
-            pass
+        # This code is for extracting the minimum version of the client's request
+        if flask_request.values.get('payload'):
+            payload = flask_request.values.get('payload')
+            clientDict = json.loads(payload)
+            try:
+                clientVC = clientDict[key]
+            except:
+                pass
 
-    # key exists, return the value
-    if key in store:
-        #TODO: compare the client VC to the server VC
-        if store[key].value == None:
+        # key exists, return the value
+        if key in store:
+            #TODO: compare the client VC to the server VC
+            if store[key].value == None:
+                response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
+                response.headers['Content-Type'] = 'application/json'
+                return response
+            elif store[key].compare_to(clientVC) <= 0:
+                clientDict[key] = store[key].payload
+                response = make_response(jsonify({'result': 'Success', 'value': store[key].value, 'payload': clientDict}), 200)
+                response.headers['Content-Type'] = 'application/json'
+                return response
+            else:
+                response = make_response(jsonify({'result': 'Error', 'error': 'payload too old', 'payload': clientDict}), 404)
+                response.headers['Content-Type'] = 'application/json'
+                return response
+        # key doesn't exist, return error
+        else:
             response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
             response.headers['Content-Type'] = 'application/json'
             return response
-        elif store[key].compare_to(clientVC) <= 0:
-            clientDict[key] = store[key].payload
-            response = make_response(jsonify({'result': 'Success', 'value': store[key].value, 'payload': clientDict}), 200)
-            response.headers['Content-Type'] = 'application/json'
-            return response
-        else:
-            response = make_response(jsonify({'result': 'Error', 'error': 'payload too old', 'payload': clientDict}), 404)
-            response.headers['Content-Type'] = 'application/json'
-            return response
-    # key doesn't exist, return error
-    else:
-        response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
-        response.headers['Content-Type'] = 'application/json'
-        return response
 
 
 # Checks whether the value exists
 @app.route('/keyValue-store/search/<key>', methods=['GET'])
 def kvs_search(key):
-    clientDict = {}
-    payload = {}
-    if flask_request.values.get('payload'):
-        payload = flask_request.values.get('payload')
-        clientDict = json.loads(payload)
-    # if the key exists, return true, otherwise return false
-    if key in store and store[key].value != None:
-        response = make_response(jsonify({'result':'Success', 'isExists':True, 'payload':clientDict}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
-    else:
-        response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': clientDict}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+    if not waiting:
+        clientDict = {}
+        payload = {}
+        if flask_request.values.get('payload'):
+            payload = flask_request.values.get('payload')
+            clientDict = json.loads(payload)
+        # if the key exists, return true, otherwise return false
+        if key in store and store[key].value != None:
+            response = make_response(jsonify({'result':'Success', 'isExists':True, 'payload':clientDict}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': clientDict}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
 
 @app.route('/keyValue-store/<key>', methods=['PUT'])
 def kvs_put(key):
-    clientVC = {}
-    clientDict = {}
-    payload = {}
+    if not waiting:
+        clientVC = {}
+        clientDict = {}
+        payload = {}
 
-    # This code is for extracting the minimum version of the client's request
-    if flask_request.values.get('payload'):
-        payload = flask_request.values.get('payload')
-        clientDict = json.loads(payload)
-        try:
-            clientVC = clientDict[key]
-        except:
-            pass
+        # This code is for extracting the minimum version of the client's request
+        if flask_request.values.get('payload'):
+            payload = flask_request.values.get('payload')
+            clientDict = json.loads(payload)
+            try:
+                clientVC = clientDict[key]
+            except:
+                pass
 
-    value = flask_request.values.get('val')
+        value = flask_request.values.get('val')
 
-    # if empty payload
-    if not value:
-        response = make_response(jsonify({'result':'Error', 'msg':"Value is missing", 'payload':clientDict}), 422)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        # if empty payload
+        if not value:
+            response = make_response(jsonify({'result':'Error', 'msg':"Value is missing", 'payload':clientDict}), 422)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
-    # key length is too long or too short; should be 1 <= len(key) <= 200
-    if not 1 <= len(key) <= 200:
-        response = make_response(jsonify({'result':'Error', 'msg':"Key not valid", 'payload':clientDict}), 422)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        # key length is too long or too short; should be 1 <= len(key) <= 200
+        if not 1 <= len(key) <= 200:
+            response = make_response(jsonify({'result':'Error', 'msg':"Key not valid", 'payload':clientDict}), 422)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
-    # value is too big; should be 1mb max
-    elif len(value) > MB:
-        response = make_response(jsonify({'result':"Error", 'msg':'Object too large. Size limit is 1MB', 'payload':clientDict}), 422)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        # value is too big; should be 1mb max
+        elif len(value) > MB:
+            response = make_response(jsonify({'result':"Error", 'msg':'Object too large. Size limit is 1MB', 'payload':clientDict}), 422)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
-    # key already exists; update the value
-    if (key in store) and (store[key].value != None):
-        store[key].value = value
-        store[key].timestamp = datetime.datetime.now()
-        store[key].merge_VC(clientVC)
-        clientDict[key] = store[key].payload
-        response = make_response(jsonify({'replaced':True, 'msg':'Updated successfully', 'payload': clientDict}), 201)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        # key already exists; update the value
+        if (key in store) and (store[key].value != None):
+            store[key].value = value
+            store[key].timestamp = datetime.datetime.now()
+            store[key].merge_VC(clientVC)
+            clientDict[key] = store[key].payload
+            response = make_response(jsonify({'replaced':True, 'msg':'Updated successfully', 'payload': clientDict}), 201)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
-    # key doesn't exist yet; add it
-    else:
-        # this is a VC
-        entry_payload = {IP_PORT:0}
+        # key doesn't exist yet; add it
+        else:
+            # this is a VC
+            entry_payload = {IP_PORT:0}
 
-        store[key] = entry(value, entry_payload)
-        clientDict[key] = entry_payload
+            store[key] = entry(value, entry_payload)
+            clientDict[key] = entry_payload
 
-        response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': clientDict}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+            response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': clientDict}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
-    
 @app.route('/keyValue-store/<key>', methods=['DELETE'])
 def kvs_delete(key):
-    clientVC = {}
-    clientDict = {}
-    payload = {}
+    if not waiting:
+        clientVC = {}
+        clientDict = {}
+        payload = {}
 
-    if flask_request.values.get('payload'):
-        payload = flask_request.values.get('payload')
-        clientDict = json.loads(payload)
-        try:
-            clientVC = clientDict[key]
-        except:
-            pass
+        if flask_request.values.get('payload'):
+            payload = flask_request.values.get('payload')
+            clientDict = json.loads(payload)
+            try:
+                clientVC = clientDict[key]
+            except:
+                pass
 
-    # key already exists, delete it
-    if key in store and store[key].value != None:
-        store[key].value = None
-        store[key].merge_VC(clientVC)
-        clientDict[key] = store[key].payload
-        response = make_response(jsonify({'result':'Success', 'msg':'Key deleted', 'payload':clientDict}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
-    else:
-        response = make_response(jsonify({'result':'Error', 'msg':'Key does not exist', 'payload':clientDict}), 404)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        # key already exists, delete it
+        if key in store and store[key].value != None:
+            store[key].value = None
+            store[key].merge_VC(clientVC)
+            clientDict[key] = store[key].payload
+            response = make_response(jsonify({'result':'Success', 'msg':'Key deleted', 'payload':clientDict}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            response = make_response(jsonify({'result':'Error', 'msg':'Key does not exist', 'payload':clientDict}), 404)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+
 
 #####################################################################
 ######################          Shard        ########################
 ##################################################################### 
+@app.route('/shard/init_receive', methods=['GET'])
+def shard_init_receive():
+    payload = flask_request.values.get('ip_port')
+    if payload in VIEW:
+        response = make_response(jsonify('shards':shards), 200)
+    else:
+        response = make_respose(400)
+        #TODO: move to waiting
+    # ask everyone for what they have
 
 @app.route('/shard/my_id', methods=['GET'])
 def shard_get_id():
+    if not waiting:
     # return this one's id
+
 
 @app.route('/shard/all_ids', methods=['GET'])
 def shard_get_all():
+    if not waiting:
     # return all id's
+
+
+@app.route('/shard/members', methods=['GET'])
+def shard_get_members():
+    if not waiting:
+
+@app.route('/shard/count', methods=['GET'])
+def shard_get_count():
+    if not waiting:
+
+@app.route('shard/changeShardNumber', methods=['PUT'])
+def shard_change_num():
+    if not waiting:
 
 #####################################################################
 ###################          View Stuff         #####################
@@ -316,67 +345,70 @@ def shard_get_all():
 
 @app.route('/view', methods=['GET'])
 def view_get():
-    temp_view = VIEW.copy()
-    response = make_response(jsonify({'view': ','.join(sorted(temp_view))}), 200)
-    response.headers['Content-Type'] = 'application/json'
-    return response
+    if not waiting:
+        temp_view = VIEW.copy()
+        response = make_response(jsonify({'view': ','.join(sorted(temp_view))}), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
 
 
 @app.route('/view', methods=['PUT'])
 def view_put():
-    new_node = flask_request.values.get('ip_port')
+    if not waiting:
+        new_node = flask_request.values.get('ip_port')
 
-    if new_node in VIEW:
-        response = make_response(jsonify({'result':"Error", 'msg':str(new_node + ' is already in view')}), 404)
-        response.headers['Content-Type'] = 'application/json'
-        return response
-    else:
-        VIEW.add(new_node)
-        # broadcast to every node except this one
-        for node in VIEW - { IP_PORT }:
-            tries = 0
-            while (tries < 3):
-                try:
-                    r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node }, timeout=0.5)
-                    if r.text == "OK":
-                        break
-                    else:
+        if new_node in VIEW:
+            response = make_response(jsonify({'result':"Error", 'msg':str(new_node + ' is already in view')}), 404)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            VIEW.add(new_node)
+            # broadcast to every node except this one
+            for node in VIEW - { IP_PORT }:
+                tries = 0
+                while (tries < 3):
+                    try:
+                        r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node }, timeout=0.5)
+                        if r.text == "OK":
+                            break
+                        else:
+                            tries += 1
+                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         tries += 1
-                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                    tries += 1
-                    continue
-        response = make_response(jsonify({'result':"Success", 'msg':str('Successfully added ' + new_node + ' to view')}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+                        continue
+            response = make_response(jsonify({'result':"Success", 'msg':str('Successfully added ' + new_node + ' to view')}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
 
 @app.route('/view', methods=['DELETE'])
 def view_delete():
-    new_node = flask_request.values.get('ip_port')
+    if not waiting:
+        new_node = flask_request.values.get('ip_port')
 
-    if new_node not in VIEW:
-        response = make_response(jsonify({'result':"Error", 'msg':str(new_node + ' is not in current view')}), 404)
-        response.headers['Content-Type'] = 'application/json'
-        return response
-    else:
-        # broadcast to every node except this one
-        for node in VIEW - { IP_PORT }:
-            tries = 0
-            while (tries < 3):
-                try:
-                    r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node }, timeout=0.5)
-                    if r.text == "OK":
-                        break
-                    else:
+        if new_node not in VIEW:
+            response = make_response(jsonify({'result':"Error", 'msg':str(new_node + ' is not in current view')}), 404)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            # broadcast to every node except this one
+            for node in VIEW - { IP_PORT }:
+                tries = 0
+                while (tries < 3):
+                    try:
+                        r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node }, timeout=0.5)
+                        if r.text == "OK":
+                            break
+                        else:
+                            tries += 1
+                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         tries += 1
-                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                    tries += 1
-                    continue
+                        continue
 
-        VIEW.remove(new_node)
-        response = make_response(jsonify({'result':"Success", 'msg':str('Successfully removed ' + new_node + ' from view')}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+            VIEW.remove(new_node)
+            response = make_response(jsonify({'result':"Success", 'msg':str('Successfully removed ' + new_node + ' from view')}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
 
 
 #####################################################################
@@ -386,25 +418,27 @@ def view_delete():
 # ack view update request
 @app.route('/view/update/ack', methods=['PUT'])
 def view_update_ack():
-    new_view = flask_request.values.get('ip_port')
-    if new_view not in VIEW:
-        VIEW.add(new_view)
-    response = make_response("OK")
-    response.headers['Content-Type'] = 'text/plain'
-    return response
+    if not waiting:
+        new_view = flask_request.values.get('ip_port')
+        if new_view not in VIEW:
+            VIEW.add(new_view)
+        response = make_response("OK")
+        response.headers['Content-Type'] = 'text/plain'
+        return response
 
 # ack view deletion request
 @app.route('/view/delete/ack', methods=['PUT'])
 def view_delete_ack():
-    new_view = flask_request.values.get('ip_port')
-    if new_view in VIEW:
-        VIEW.remove(new_view)
-    response = make_response("OK")
-    response.headers['Content-Type'] = 'text/plain'
-    return response
+    if not waiting:
+        new_view = flask_request.values.get('ip_port')
+        if new_view in VIEW:
+            VIEW.remove(new_view)
+        response = make_response("OK")
+        response.headers['Content-Type'] = 'text/plain'
+        return response
 
-def hash(value):
-    return value % 69 + 420
+def shard_hash(value):
+    return hasn(value) % len(shards)
 
 
 #####################################################################
@@ -414,10 +448,11 @@ def hash(value):
 # secret endpoint to receive gossip requests
 @app.route('/gossip', methods=['PUT'])
 def gossip():
-    compare_stores(flask_request.values.get('cur_store'))
-    response = make_response(jsonify({'result':"Gossip success"}), 200)
-    response.headers['Content-Type'] = 'application/json'
-    return response
+    if not waiting:
+        compare_stores(flask_request.values.get('cur_store'))
+        response = make_response(jsonify({'result':"Gossip success"}), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
 
 
 #####################################################################
@@ -425,7 +460,13 @@ def gossip():
 #####################################################################
 
 if __name__ == "__main__":
+    for server in VIEW:
+        r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
+        if r.status_code == 400:
+            waiting = True
+        elif r.status_code == 200 and shards:
     g = gossip_thread()
+    #TODO: make init function that broadcasts to all other nodes,
     g.start()
     app.run(host="0.0.0.0", port=8080, threaded=True)
     g.stopped = True
