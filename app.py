@@ -22,7 +22,8 @@ VIEW = set(os.getenv('VIEW').split(','))
 SHARD_COUNT = os.getenv('S')
 
 store = {}
-shards = [[] for _ in range(SHARD_COUNT)]
+Shards = [[] for _ in range(SHARD_COUNT)]
+Shard_Id = None
 
 
 #####################################################################
@@ -36,16 +37,19 @@ class Gossip_thread(Thread):
         Thread.__init__(self)
         self.daemon = True
 
+    # TODO: Also pass IP_PORT with gossip, so can check if in view
+
     def run(self):
         # gossip every 125 milliseconds
         while not self.stopped:
             time.sleep(.2)                                       # sleep for 200 milliseconds
-            temp_view = VIEW.copy()
+            #temp_view = VIEW.copy()
+            temp_view = set(Shards[Shard_Id])
             if len(temp_view) > 1:
-                temp_view.remove(IP_PORT)                        # remove self from view temporarily
+                temp_view.remove(IP_PORT)                    # remove self from view temporarily
                 gossip_process_port = sample(temp_view, 1)[0]    # choose random process to gossip to
                 try:
-                    r = requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON()}, timeout=.5)
+                    r = requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON(), "sender": IP_PORT}, timeout=.5)
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     pass
 
@@ -309,35 +313,75 @@ def kvs_delete(key):
 def shard_init_receive():
     payload = flask_request.values.get('ip_port')
     if payload in VIEW:
-        response = make_response(jsonify('shards':shards), 200)
+        response = make_response(jsonify('shards':Shards), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response        
     else:
         response = make_respose(400)
-        #TODO: move to waiting
-    # ask everyone for what they have
+        response.headers['Content-Type'] = 'application/json'
+        return response
 
 @app.route('/shard/my_id', methods=['GET'])
 def shard_get_id():
     if not waiting:
-    # return this one's id
+        response = make_response(jsonify('id': Shard_Id), 200)            
+        response.headers['Content-Type'] = 'application/json'
+        return response
 
 
 @app.route('/shard/all_ids', methods=['GET'])
 def shard_get_all():
     if not waiting:
     # return all id's
+        ids = "0"
+        for i in range(1, len(Shards)):
+            ids += ","+str(i)                
 
 
-@app.route('/shard/members', methods=['GET'])
-def shard_get_members():
+@app.route('/shard/members/<shard_id>', methods=['GET'])
+def shard_get_members(shard_id):
     if not waiting:
+        # invalid shard id
+        if shard_id >= len(Shards) or shard_id < 0:
+            response = make_response(jsonify('result':'Error', 'msg': 'No shard with id ' + str(shard_id)), 404)
+            response.headers['Content-Type'] = 'application/json'
+            return response            
 
-@app.route('/shard/count', methods=['GET'])
-def shard_get_count():
-    if not waiting:
-
+        response = make_response(jsonify('result': 'Success', 'members': (',').join(Shards[shard_id])), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+            
 @app.route('shard/changeShardNumber', methods=['PUT'])
 def shard_change_num():
     if not waiting:
+        shardNum = flask_request.values.get('num')
+        # assuming shardNum is int
+        response.headers['Content-Type'] = 'application/json'
+        return response            
+
+@app.route('/shard/count/<shard_id>', methods=['GET'])
+def shard_get_count(shard_id):
+    if not waiting:
+        if shardNum <= SHARD_COUNT:
+            #Then we are reducing the number of shards which won't cause errors
+            #will need to do some rebalancing
+        else:
+            #Check for errors
+            if shardNum > len(VIEW):
+                response = make_response(jsonify('result':'Error', 'msg':'Not enough nodes for '+str(shardNum)+'shards'), 400)                     
+                response.headers['Content-Type'] = 'application/json'
+                return response
+            # we should have at least 2 nodes per shard to be fault tolerant
+            # doesn't make sense to have 0
+            if len(VIEW)/shardNum < 2: 
+                response = make_response(jsonify('result': 'Error', 'msg': 'Not enough nodes. ' + str(shardNum) + ' shards result in a nonfault tolerant shard',400) 
+                response.headers['Content-Type'] = 'application/json'
+                return response
+            #If we've gotten to this point then it's time to redistribute the nodes/data
+                              
+# hash a key to its shard
+def shard_hash(value):
+    return hasn(value) % len(Shards)        
 
 #####################################################################
 ###################          View Stuff         #####################
@@ -437,9 +481,6 @@ def view_delete_ack():
         response.headers['Content-Type'] = 'text/plain'
         return response
 
-def shard_hash(value):
-    return hasn(value) % len(shards)
-
 
 #####################################################################
 ######################        GOSSIP        #########################
@@ -449,10 +490,16 @@ def shard_hash(value):
 @app.route('/gossip', methods=['PUT'])
 def gossip():
     if not waiting:
-        compare_stores(flask_request.values.get('cur_store'))
-        response = make_response(jsonify({'result':"Gossip success"}), 200)
-        response.headers['Content-Type'] = 'application/json'
-        return response
+        if flask_request.values.get('sender') in VIEW:
+            compare_stores(flask_request.values.get('cur_store'))
+            response = make_response(jsonify({'result':"Gossip success"}), 200)
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        else:
+            # i'm a teapot                                    
+            response = make_response(jsonify({'result': "You're not real"}, 418))
+            response.headers['Content-Type'] = 'application/json'
+            return response                                
 
 
 #####################################################################
@@ -464,7 +511,7 @@ if __name__ == "__main__":
         r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
         if r.status_code == 400:
             waiting = True
-        elif r.status_code == 200 and shards:
+        elif r.status_code == 200 and Shards:
     g = gossip_thread()
     #TODO: make init function that broadcasts to all other nodes,
     g.start()
