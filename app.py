@@ -477,10 +477,7 @@ def shard_update_store():
             # remove value from store
             del store[key]            
             
-    if len(diff) != 0:
-        response = make_response(jsonify('result':'Success','diff':diff),200)
-    else:
-        response = make_response(jsonify('result':'Success','msg':'no update needed'),200)
+    response = make_response(jsonify('result':'Success','diff':diff),200)
     response.headers['Content-Type'] = 'application/json'
     return response
 # hash a key to its shard
@@ -596,7 +593,7 @@ def view_delete_ack():
 @app.route('/gossip', methods=['PUT'])
 def gossip():
     if not waiting:
-        if flask_request.values.get('sender') in VIEW:
+        if flask_request.values.get('sender') in Shards[Shard_Id]:
             compare_stores(flask_request.values.get('cur_store'))
             response = make_response(jsonify({'result':"Gossip success"}), 200)
             response.headers['Content-Type'] = 'application/json'
