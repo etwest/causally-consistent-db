@@ -201,21 +201,23 @@ def kvs_get(key):
                 response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
+
+            # if key doesn't hash to this partition, forward the request.
             else:
                 for node in Shards[shard_hash(key)]:
                     url = 'http://' + node + '/keyValue-store/' + key
                     try:
                         # forward return whatever response.                        
-                        r = requests.put(url, clientDict, timeout=.5)
+                        r = requests.get(url, clientDict, timeout=.5)
                         return r
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
-                # if all fail, then all nodes in partition are dead and                                                                          
+                # if all fail, then all nodes in partition are dead. do what?                                                                       
 
 
 
-# Checks whether the value exists
+# Chercks whether the value exists
 @app.route('/keyValue-store/search/<key>', methods=['GET'])
 def kvs_search(key):
     if not waiting:
@@ -230,10 +232,22 @@ def kvs_search(key):
             response.headers['Content-Type'] = 'application/json'
             return response
         else:
-            response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': clientDict}), 200)
-            response.headers['Content-Type'] = 'application/json'
-            return response
+            # check if this is the shard that's supposed to own it.
+            if shard_hash(key) == Shard_Id:            
+                response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': clientDict}), 200)
+                response.headers['Content-Type'] = 'application/json'
+                return response
 
+            # if key doesn't hash to this partition, forward the request.
+            else:
+                for node in Shards[shard_hash(key)]:
+                    url = 'http://' + node + '/keyValue-store/search/' + key
+                    try:
+                        # forward return whatever response.                        
+                        r = requests.get(url, 'payload': clientDict, timeout=.5)
+                        return r
+                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                        continue
 
 @app.route('/keyValue-store/<key>', methods=['PUT'])
 def kvs_put(key):
@@ -252,6 +266,18 @@ def kvs_put(key):
                 pass
 
         value = flask_request.values.get('val')
+
+        # if key doesn't hash to this partition, forward the request.
+        if shard_hash(key) != Shard_Id:
+            for node in Shards[shard_hash(key)]:
+                url = 'http://' + node + '/keyValue-store/' + key
+                try:
+                    # forward return whatever response.                        
+                    r = requests.put(url, {'payload': clientDict, 'val': value}, timeout=.5)
+                    return r
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    continue
+
 
         # if empty payload
         if not value:
@@ -307,6 +333,16 @@ def kvs_delete(key):
                 clientVC = clientDict[key]
             except:
                 pass
+
+        if shard_hash(key) != Shard_Id:
+            for node in Shards[shard_hash(key)]:
+                url = 'http://' + node + '/keyValue-store/' + key
+                try:
+                    # forward return whatever response.                        
+                    r = requests.delete(url, {'payload': clientDict}, timeout=.5)
+                    return r
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    continue
 
         # key already exists, delete it
         if key in store and store[key].value != None:
@@ -423,6 +459,13 @@ def shard_update_store():
     #Set internal view of shards to be what was given to us
     newShards = flask_request.values.get('Shards')
     Shards = json.loads(newShards)
+    ind = 0
+    for shard in Shards:
+        if IP_PORT in shard:
+            Shard_Id = ind
+            break
+        ind+=1                                            
+
     #Loop through our store and figure out what stays and what moves
     for key, entry in store.items():
         # key_hash tells us where entry belongs
@@ -432,7 +475,9 @@ def shard_update_store():
         if key_hash != Shard_Id:
             diff[key] = entry
             # remove value from store
-    if diff.length != 0:
+            del store[key]            
+            
+    if len(diff) != 0:
         response = make_response(jsonify('result':'Success','diff':diff),200)
     else:
         response = make_response(jsonify('result':'Success','msg':'no update needed'),200)
