@@ -191,6 +191,15 @@ def store_to_JSON():
     json_store = json.dumps(json_store)
     return json_store
 
+# This function is used for creating a temp_store out of the store in json form given to us
+# json_store is a json string which contains the a store (dictionary of key and entry)
+def JSON_to_store(json_store):
+    temp_store = {}
+    json_store = json.loads(json_store)
+    for key, value in json_store.items():
+        value['timestamp'] = datetime.datetime.strptime(value['timestamp'], '%Y-%m-%d %H:%M:%S.%f')
+        temp_store[key] = entry(value['value'], value['payload'], value['timestamp'])
+    return temp_store
 
 def compare_stores(other):
     if not other:
@@ -271,9 +280,7 @@ def kvs_get(key):
                 # if all nodes in the partition are dead
                 response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
                 response.headers['Content-Type'] = 'application/json'
-                return response                                                                      
-
-
+                return response
 
 # Chercks whether the value exists
 @app.route('/keyValue-store/search/<key>', methods=['GET'])
@@ -471,19 +478,20 @@ def shard_rebalance_primary():
     #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
         r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=.5)
-        compare_stores(flask_request.values.get('store'))
+        oth_store = r.json()['store']
+        compare_stores(oth_store)
         # pull the store out of r and perform a comparison/update of our store with the other store
     #After I verify that I have everything from my shard friends... update membership of my store
     shard_update_store()
     #After I update my store tell all the nodes in my shard to set their store to mine
     for node in Shards[Shard_ID]:
-        r = requests.put('http://' + node + '/shard/setStore', {'store':store}, timeout=.5)
+        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON()}, timeout=.5)
     do_gossip = True
 
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
     do_gossip = False
-    response = make_response(jsonify('store':store),200)
+    response = make_response(jsonify('store':store_to_JSON),200)
     response.headers['Content-Type'] = 'application/json'
     return response
 
@@ -491,7 +499,7 @@ def shard_rebalance_secondary():
 def shard_setStore():
     newStore = flask_request.values.get('store')
     #TODO: is this actually correct?
-    store = json.loads(newStore)
+    store = JSON_to_store(newStore)
     do_gossip = True
     response = make_response("OK",200)
     response.headers['Content-Type'] = 'application/text'
