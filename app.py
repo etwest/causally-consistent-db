@@ -434,7 +434,24 @@ def kvs_delete(key):
 
 #####################################################################
 ######################          Shard        ########################
-##################################################################### 
+#####################################################################
+def shard_update_store():
+    diff={}
+    #Set internal view of shards to be what was given to us
+    for i,shard in enumerate(Shards):
+        if IP_PORT in shard:
+            Shard_Id = i 
+            break
+    #Loop through our store and figure out what stays and what moves
+    for key, entry in store.items():
+        # key_hash tells us where entry belongs
+        key_hash = shard_hash(key)
+        # if our key belongs to another shard, then add to diff
+        # and delete
+        if key_hash != Shard_Id:
+            diff[key] = entry
+            # remove value from store
+            del store[key]
 
 @app.route('/shard/init_receive', methods=['GET'])
 def shard_init_receive():
@@ -451,20 +468,34 @@ def shard_init_receive():
 @app.route('/shard/rebalance_primary', methods=['GET'])
 def shard_rebalance_primary():
     do_gossip = False
+    #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
-        r = requests.get('http://' + node + '/shard/rebalance_secondary')
+        r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=.5)
+        compare_stores(flask_request.values.get('store'))
         # pull the store out of r and perform a comparison/update of our store with the other store
-    
+    #After I verify that I have everything from my shard friends... update membership of my store
+    shard_update_store()
+    #After I update my store tell all the nodes in my shard to set their store to mine
+    for node in Shards[Shard_ID]:
+        r = requests.put('http://' + node + '/shard/setStore', {'store':store}, timeout=.5)
     do_gossip = True
 
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
     do_gossip = False
+    response = make_response(jsonify('store':store),200)
+    response.headers['Content-Type'] = 'application/json'
+    return response
 
 @app.route('/shard/setStore', methods=['PUT'])
 def shard_setStore():
     newStore = flask_request.values.get('store')
+    #TODO: is this actually correct?
+    store = json.loads(newStore)
     do_gossip = True
+    response = make_response("OK",200)
+    response.headers['Content-Type'] = 'application/text'
+    return response
 
 @app.route('/shard/my_id', methods=['GET'])
 def shard_get_id():
@@ -545,24 +576,6 @@ def shard_change_num():
                 return response
             #If we've gotten to this point then it's time to redistribute the nodes/data
 # compares shards' store with ours and send them updates they don't have
-
-def shard_update_store():
-    diff={}
-    #Set internal view of shards to be what was given to us
-    for i,shard in enumerate(Shards):
-        if IP_PORT in shard:
-            Shard_Id = i 
-            break
-    #Loop through our store and figure out what stays and what moves
-    for key, entry in store.items():
-        # key_hash tells us where entry belongs
-        key_hash = shard_hash(key)
-        # if our key belongs to another shard, then add to diff
-        # and delete
-        if key_hash != Shard_Id:
-            diff[key] = entry
-            # remove value from store
-            del store[key]
 
 # hash a key to its shard
 def shard_hash(value):
