@@ -51,50 +51,51 @@ def addToShards(ip_port):
 def removeFromShards(ip_port):
     shard_id = i 
     # catches the case if there is 0 
-    for i,shard in enumerate(Shards):
+    for i, shard in enumerate(Shards):
         if ip_port in shard:
             shard_id = i
     # If removing a shard will cause imbalance
-    equalityCheck = len(Shards[shard_id]) < (len(VIEW)/SHARD_COUNT)
-    twoCheck = len(Shards[shard_id]) == 2
-    oneCheck = len(Shards[shard_id]) == 1 
+    equalityCheck = len(Shards[shard_id]) < (len(VIEW) / SHARD_COUNT)
+    twoCheck = len(Shards[shard_id]) == 2 # when we need to delete the entire shard
+    # oneCheck = len(Shards[shard_id]) == 1 # only happens when there's one shard and one node
+    #now remove the 
+    Shards[shard_id].remove(ip_port)
     # removing first node to redistribute to current node
     # doesn't matter if it's last node or not
-    if equalityCheck :
-        imax=0 # holds index of max
-        nmax=-1 # holds value of max
-        for i,shard in enumerate(Shards):
+    if equalityCheck:
+        # if there's an imbalance
+        imax = 0 # holds index of max
+        nmax = -1 # holds value of max
+        for i, shard in enumerate(Shards):
             if len(shard) > nmax:
-                nmax=len(shard)
-                imax=i
+                nmax = len(shard)
+                imax = i
         first_node = Shards[imax][0]                                
         Shards[imax].remove(first_node)
         Shards[shard_id].append(first_node)
-    elif oneCheck:
-        #TODO: move node from this to another
-        first_node = Shards[shard_id][0]
-        Shards[shard_id].remove(first_node)
-        imin=0 # holds index of max
-        nmin=SYS.ma # holds value of max
-        for i,shard in enumerate(Shards):
-            if len(shard) < nmin:
-                nmin=len(shard)
-                imin=i
+        return True
+    # elif oneCheck:
+    #     # Removes the last node from Shards
+    #     first_node = Shards[shard_id][0]
+    #     Shards[shard_id].remove(first_node)
     elif twoCheck:
         #TODO: remove ip port node and move other node
         #TODO: remove list from Shards                                                            
+        first_node = Shards[shard_id][0]
+        Shards[shard_id].remove(first_node)
+        Shards.remove(shard_id)
 
-# Functions: takes Ip port and shard_id and moves node from current shard to
-# to shard_id
-#TODO: broadcast change after done        
-def movetoShard(ip_port,shard_id):
-    node_shard=0
-    for i, shard in enumerate(Shards)    
-        if IP_PORT in shard:
-            node_shard=i
-    temp_node = 
+        imin = 0 # holds index of max
+        nmin = -1 # holds value of max
+        for i, shard in enumerate(Shards):
+            if len(shard) > nmin:
+                nmin = len(shard)
+                imin = i
+        Shards[imin].append(first_node)
+        return False
+    return True
 
-    
+
 #####################################################################
 ###################           Classes           #####################
 ##################################################################### 
@@ -323,7 +324,7 @@ def kvs_search(key):
                     url = 'http://' + node + '/keyValue-store/search/' + key
                     try:
                         # forward return whatever response.                        
-                        r = requests.get(url, 'payload': clientDict, timeout=.5)
+                        r = requests.get(url, {'payload': clientDict}, timeout=.5)
                         return r
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
@@ -478,7 +479,7 @@ def shard_update_store():
 def shard_init_receive():
     payload = flask_request.values.get('ip_port')
     if payload in VIEW:
-        response = make_response(jsonify('shards':Shards), 200)
+        response = make_response(jsonify({'shards':Shards}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response        
     else:
@@ -507,7 +508,7 @@ def shard_rebalance_primary():
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
     do_gossip = False
-    response = make_response(jsonify('store':store_to_JSON),200)
+    response = make_response(jsonify({'store':store_to_JSON()}),200)
     response.headers['Content-Type'] = 'application/json'
     return response
 
@@ -524,7 +525,7 @@ def shard_setStore():
 @app.route('/shard/my_id', methods=['GET'])
 def shard_get_id():
     if not waiting:
-        response = make_response(jsonify('id': Shard_Id), 200)            
+        response = make_response(jsonify({'id': Shard_Id}), 200)            
         response.headers['Content-Type'] = 'application/json'
         return response
 
@@ -535,7 +536,7 @@ def shard_get_all():
         ids = "0"
         for i in range(1, len(Shards)):
             ids += ","+str(i)          
-        response = make_response(jsonify('result': 'Success', 'shard_ids': ids), 200)
+        response = make_response(jsonify({'result': 'Success', 'shard_ids': ids}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response        
 
@@ -544,11 +545,11 @@ def shard_get_members(shard_id):
     if not waiting:
         # invalid shard id
         if shard_id not in range(0,len(Shards)):
-            response = make_response(jsonify('result':'Error', 'msg': 'No shard with id ' + str(shard_id)), 404)
+            response = make_response(jsonify({'result':'Error', 'msg': 'No shard with id ' + str(shard_id)}), 404)
             response.headers['Content-Type'] = 'application/json'
             return response            
 
-        response = make_response(jsonify('result': 'Success', 'members': ','.join(Shards[shard_id])), 200)
+        response = make_response(jsonify({'result': 'Success', 'members': ','.join(Shards[shard_id])}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response
 
@@ -558,11 +559,11 @@ def shard_get_count(shard_id):
 
         # if invalid shard id
         if shard_id not in range(0,len(Shards)):
-            response = make_response(jsonify('result':'Error', 'msg': 'No shard with id ' + str(shard_id)), 404)
+            response = make_response(jsonify({'result':'Error', 'msg': 'No shard with id ' + str(shard_id)}), 404)
             response.headers['Content-Type'] = 'application/json'
             return response
         if shard_id == Shard_Id: #If requested shard ID is us
-            response = make_response(jsonify('result': 'Success', 'count': len(store), 200))
+            response = make_response(jsonify({'result': 'Success', 'count': len(store)}, 200))
             response.headers['Content-Type'] = 'application/json'
             return response
         else: # If requested shard ID is one of the other shards
@@ -583,26 +584,22 @@ def shard_change_num():
     if not waiting:
         shardNum = flask_request.values.get('num')
         if shardNum <= SHARD_COUNT:
-            print "nothing"
+            print("nothing")
             #Then we are reducing the number of shards which won't cause errors
             #will need to do some rebalancing
         else:
             #Check for errors
             if shardNum > len(VIEW):
-                response = make_response(jsonify('result':'Error', 'msg':'Not enough nodes for '+str(shardNum)+'shards'), 400) 
+                response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(shardNum)+'shards'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
             # we should have at least 2 nodes per shard to be fault tolerant
             # doesn't make sense to have 0
             if len(VIEW) / shardNum < 2: 
-                response = make_response(jsonify('result': 'Error', 'msg': 'Not enough nodes. ' + str(shardNum) + ' shards result in a nonfault tolerant shard'), 400) 
+                response = make_response(jsonify({'result': 'Error', 'msg': 'Not enough nodes. ' + str(shardNum) + ' shards result in a nonfault tolerant shard'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
             #If we've gotten to this point then it's time to redistribute the nodes/data
-
-# endpoint to facilitate balancing shard partitions
-@app.route('shard/movedShard', methods=['PUT'])
-def shard_moved_shard():
     
     
 
@@ -677,7 +674,9 @@ def view_delete():
             # need to be careful. what happens if the node
             # being deleted still thinks that it's in the view?
 
-            # first remove
+            # first removethe node from the Shrards
+            # This function returns True if we should continue as normal
+            # returns False if we should use the rebalancing protocol
             removeFromShards(new_node)
 
             # broadcast to every node except this one
@@ -718,8 +717,9 @@ def view_update_ack():
         # should updating the shards be in this conditional?
         if new_view not in VIEW:
             VIEW.add(new_view)
-            # TODO: Consider making merge Shards function like mergeVC
-            Shards = flask_request.values.get('shard_view')
+
+        Shards = flask_request.values.get('shard_view')
+
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
         return response
@@ -732,15 +732,16 @@ def view_delete_ack():
         if new_view in VIEW:
             VIEW.remove(new_view)
             Shards = flask_request.values.get('shard_view')
+        # check the new Shards to see if I was moved from one shard to another
         for partition_num, partition in enumerate(Shards):
             if IP_PORT in partition:
                 # found ourselves in partition
-                if partition_num not Shard_Id:
+                if partition_num != Shard_Id:
                     store = {}
                 break
         new_shard_list = json.loads(flask_request.values.get('shards'))
         if not new_shard_list:
-            print "we fucked up lmaooo"
+            print("we fucked up lmaooo")
         Shards = new_shard_list
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
@@ -778,6 +779,7 @@ if __name__ == "__main__":
         if r.status_code == 400:
             waiting = True
         elif r.status_code == 200 and Shards:
+            
     g = gossip_thread()
     #TODO: make init function that broadcasts to all other nodes,
     g.start()
