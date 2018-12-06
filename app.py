@@ -43,9 +43,11 @@ def addToShards(ip_port):
         ind += 1
     Shards[pos].append(ip_port)
 
+    return pos
+
 #TODO: check for imbalances
 # 1. one shard has less than 2 nodes
-# Funciton: removes a node specified by ip_port
+# Function: removes a node specified by ip_port
 def removeFromShards(ip_port):
     shard_id = i 
     # catches the case if there is 0 
@@ -56,31 +58,43 @@ def removeFromShards(ip_port):
     equalityCheck = len(Shards[shard_id]) < (len(VIEW)/SHARD_COUNT)
     twoCheck = len(Shards[shard_id]) == 2
     oneCheck = len(Shards[shard_id]) == 1 
+    # removing first node to redistribute to current node
+    # doesn't matter if it's last node or not
     if equalityCheck :
-        #TODO: move node from another to this
         imax=0 # holds index of max
         nmax=-1 # holds value of max
-        for i, shard in enumerate(Shards):
+        for i,shard in enumerate(Shards):
             if len(shard) > nmax:
                 nmax=len(shard)
                 imax=i
-        #TODO: actual change is handled by view function
-                                                    
+        first_node = Shards[imax][0]                                
+        Shards[imax].remove(first_node)
+        Shards[shard_id].append(first_node)
     elif oneCheck:
         #TODO: move node from this to another
-    
+        first_node = Shards[shard_id][0]
+        Shards[shard_id].remove(first_node)
+        imin=0 # holds index of max
+        nmin=SYS.ma # holds value of max
+        for i,shard in enumerate(Shards):
+            if len(shard) < nmin:
+                nmin=len(shard)
+                imin=i
     elif twoCheck:
         #TODO: remove ip port node and move other node
         #TODO: remove list from Shards                                                            
 
-# Moves a node from one shard to another
+# Functions: takes Ip port and shard_id and moves node from current shard to
+# to shard_id
 #TODO: broadcast change after done        
 def movetoShard(ip_port,shard_id):
     node_shard=0
     for i, shard in enumerate(Shards)    
         if IP_PORT in shard:
             node_shard=i
-    temp_node =                                                                                     
+    temp_node = 
+
+    
 #####################################################################
 ###################           Classes           #####################
 ##################################################################### 
@@ -472,15 +486,16 @@ def shard_init_receive():
         response.headers['Content-Type'] = 'application/json'
         return response
 
+# When the number of shards in changed call this function on one node from each shard
 @app.route('/shard/rebalance_primary', methods=['GET'])
 def shard_rebalance_primary():
     do_gossip = False
     #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
+        # pull the store out of r and perform a comparison/update of our store with the other store
         r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=.5)
         oth_store = r.json()['store']
         compare_stores(oth_store)
-        # pull the store out of r and perform a comparison/update of our store with the other store
     #After I verify that I have everything from my shard friends... update membership of my store
     shard_update_store()
     #After I update my store tell all the nodes in my shard to set their store to mine
@@ -488,6 +503,7 @@ def shard_rebalance_primary():
         r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON()}, timeout=.5)
     do_gossip = True
 
+# the primary node
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
     do_gossip = False
@@ -549,12 +565,12 @@ def shard_get_count(shard_id):
             response = make_response(jsonify('result': 'Success', 'count': len(store), 200))
             response.headers['Content-Type'] = 'application/json'
             return response
-        else: #If requested shard ID is one of the other shards
+        else: # If requested shard ID is one of the other shards
             tries = 0
             while tries < 2:
                 send_to = sample(Shards[shard_id], 1)[0]
                 try:
-                    #forward the request
+                    # forward the request
                     r = requests.get('http://' + send_to + '/shard/count/', timeout=.5)
                     response = make_response(r.text, r.status_code)
                     response.headers['Content-Type'] = 'application/json'
@@ -578,12 +594,17 @@ def shard_change_num():
                 return response
             # we should have at least 2 nodes per shard to be fault tolerant
             # doesn't make sense to have 0
-            if len(VIEW)/shardNum < 2: 
+            if len(VIEW) / shardNum < 2: 
                 response = make_response(jsonify('result': 'Error', 'msg': 'Not enough nodes. ' + str(shardNum) + ' shards result in a nonfault tolerant shard'), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
             #If we've gotten to this point then it's time to redistribute the nodes/data
-# compares shards' store with ours and send them updates they don't have
+
+# endpoint to facilitate balancing shard partitions
+@app.route('shard/movedShard', methods=['PUT'])
+def shard_moved_shard():
+    
+    
 
 # hash a key to its shard
 def shard_hash(value):
@@ -613,11 +634,10 @@ def view_put():
             response.headers['Content-Type'] = 'application/json'
             return response
         else:
-            # first, add the new node to our view.
-            # then, find the partition with least number of nodes
-            # and add the node to that.
+
+            # add this to shards array.
             VIEW.add(new_node)
-            addToShards(new_node)
+            new_sid = addToShards(new_node)
 
             # broadcast to every node except this one
             # send our new partitions array so that they can update as well
@@ -625,7 +645,7 @@ def view_put():
                 tries = 0
                 while (tries < 3):
                     try:
-                        r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node, 'shard_view': Shards}, timeout=0.5)
+                        r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node, 'pid': new_sid, 'shard_view': Shards}, timeout=0.5)
                         if r.text == "OK":
                             break
                         else:
@@ -633,6 +653,10 @@ def view_put():
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         tries += 1
                         continue
+
+            # first, add the new node to our view.
+            # then, find the partition with least number of nodes
+            # and add the node to that.
 
             response = make_response(jsonify({'result':"Success", 'msg':str('Successfully added ' + new_node + ' to view')}), 200)
             response.headers['Content-Type'] = 'application/json'
@@ -652,7 +676,8 @@ def view_delete():
         else:
             # need to be careful. what happens if the node
             # being deleted still thinks that it's in the view?
-            VIEW.remove(new_node)
+
+            # first remove
             removeFromShards(new_node)
 
             # broadcast to every node except this one
@@ -669,10 +694,12 @@ def view_delete():
                         tries += 1
                         continue
 
+            VIEW.remove(new_node)
+            #removeFromShards(new_node)
+
             response = make_response(jsonify({'result':"Success", 'msg':str('Successfully removed ' + new_node + ' from view')}), 200)
             response.headers['Content-Type'] = 'application/json'
             return response
-
 
 #####################################################################
 ######################          ACK         #########################
@@ -683,6 +710,12 @@ def view_delete():
 def view_update_ack():
     if not waiting:
         new_view = flask_request.values.get('ip_port')
+        # if this is the new node, set its shard id to be
+        # the one assigned by the existing cluster.
+        if IP_PORT == new_view:
+            Shard_Id = flask_request.values.get('pid')
+        
+        # should updating the shards be in this conditional?
         if new_view not in VIEW:
             VIEW.add(new_view)
             # TODO: Consider making merge Shards function like mergeVC
@@ -699,8 +732,19 @@ def view_delete_ack():
         if new_view in VIEW:
             VIEW.remove(new_view)
             Shards = flask_request.values.get('shard_view')
+        for partition_num, partition in enumerate(Shards):
+            if IP_PORT in partition:
+                # found ourselves in partition
+                if partition_num not Shard_Id:
+                    store = {}
+                break
+        new_shard_list = json.loads(flask_request.values.get('shards'))
+        if not new_shard_list:
+            print "we fucked up lmaooo"
+        Shards = new_shard_list
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
+        # loop through shard partitions to find self
         return response
 
 
