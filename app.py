@@ -458,12 +458,8 @@ def kvs_delete(key):
 ######################          Shard        ########################
 #####################################################################
 def shard_update_store():
-    diff={}
-    #Set internal view of shards to be what was given to us
-    for i,shard in enumerate(Shards):
-        if IP_PORT in shard:
-            Shard_Id = i 
-            break
+    # Create a list of dictionaries, each dictionary refers to the data that will be transferred another Shard
+    diff=[{} for _ in Shards]
     #Loop through our store and figure out what stays and what moves
     for key, entry in store.items():
         # key_hash tells us where entry belongs
@@ -471,9 +467,11 @@ def shard_update_store():
         # if our key belongs to another shard, then add to diff
         # and delete
         if key_hash != Shard_Id:
-            diff[key] = entry
+            # place the key in the Shard that it now belongs in
+            diff[key_hash][key] = entry
             # remove value from store
             del store[key]
+    return diff
 
 @app.route('/shard/init_receive', methods=['GET'])
 def shard_init_receive():
@@ -488,20 +486,44 @@ def shard_init_receive():
         return response
 
 # When the number of shards in changed call this function on one node from each shard
-@app.route('/shard/rebalance_primary', methods=['GET'])
+# TODO: Should this function be called after a VIEW/Shard change or should it be called to propogate it itself?
+#       currently acting as if this one is doing the propagation itself 
+# This endpoint is used when the number of shards has either increased or decreased
+# This change needs to be propogated in a very safe and specific manner
+# Endpoint takes an argument of 'shards' which contians the new Shards list that it should adopt
+@app.route('/shard/rebalance_primary', methods=['PUT'])
 def shard_rebalance_primary():
     do_gossip = False
+
+    # Set internal view of shards to be what was given to us
+    # TODO: json.loads?
+    Shards = flack_request.values.get('shards')
+    for i,shard in enumerate(Shards):
+        if IP_PORT in shard:
+            Shard_Id = i 
+            break
+    SHARD_COUNT = len(Shards)
+
     #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
         # pull the store out of r and perform a comparison/update of our store with the other store
         r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=.5)
         oth_store = r.json()['store']
         compare_stores(oth_store)
+    
     #After I verify that I have everything from my shard friends... update membership of my store
-    shard_update_store()
+    diff = shard_update_store()
+   
+    # send the data that I am no longer responsible for to the Shards who are now responsible for it
+    for i,shard in enumerate(diff):
+        # exclude all empty lists (no need to send no data) and my own Shard
+        if len(shard) > 0:
+            r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=.5)
+    
     #After I update my store tell all the nodes in my shard to set their store to mine
     for node in Shards[Shard_ID]:
-        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON()}, timeout=.5)
+        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': Shards}, timeout=.5)
+    # I'm finally done and can resume gossiping my data around
     do_gossip = True
 
 # the primary node
@@ -512,12 +534,34 @@ def shard_rebalance_secondary():
     response.headers['Content-Type'] = 'application/json'
     return response
 
+# used to override the internal store of a node with the new data
 @app.route('/shard/setStore', methods=['PUT'])
 def shard_setStore():
+    # TODO: might need a json.loads here
     newStore = flask_request.values.get('store')
+    
+    #Set internal view of shards to be what was given to us
+    Shards = flack_request.values.get('shards')
+    for i,shard in enumerate(Shards):
+        if IP_PORT in shard:
+            Shard_Id = i 
+            break
+    SHARD_COUNT = len(Shards)
+    
     #TODO: is this actually correct?
     store = JSON_to_store(newStore)
     do_gossip = True
+    response = make_response("OK",200)
+    response.headers['Content-Type'] = 'application/text'
+    return response
+
+# used to merge the internal store of a node with new data
+@app.route('/shard/updateStore', methods=['PUT'])
+def shard_setStore():
+    # TODO: might need a json.loads here
+    newStore = flask_request.values.get('store')
+    
+    compare_stores(newStore)
     response = make_response("OK",200)
     response.headers['Content-Type'] = 'application/text'
     return response
