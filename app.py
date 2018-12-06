@@ -779,7 +779,7 @@ if __name__ == "__main__":
         if r.status_code == 400:
             waiting = True
         elif r.status_code == 200 and Shards:
-            
+            # TODO: eugene rewrites the code that baiwen deleted xdddd
     g = gossip_thread()
     #TODO: make init function that broadcasts to all other nodes,
     g.start()
