@@ -28,7 +28,7 @@ Shard_Id = None
 #Variable to control whether or not this node should be sending or accepting gossip requests
 do_gossip = True
 
-waiting = False
+waiting = False # will be set to false right after initial init
 
 # Adding a node to a shard
 # Will add the node to the shard with the fewest nodes
@@ -45,13 +45,13 @@ def addToShards(ip_port):
         ind += 1
     Shards[pos].append(ip_port)
 
-    return pos
+    #return pos
 
 #TODO: check for imbalances
 # 1. one shard has less than 2 nodes
 # Function: removes a node specified by ip_port
 def removeFromShards(ip_port):
-    shard_id = i 
+    #shard_id = i 
     # catches the case if there is 0 
     for i, shard in enumerate(Shards):
         if ip_port in shard:
@@ -122,7 +122,7 @@ class Gossip_thread(Thread):
                     temp_view.remove(IP_PORT)                    # remove self from view temporarily
                     gossip_process_port = sample(temp_view, 1)[0]    # choose random process to gossip to
                     try:
-                        r = requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON(), "sender": IP_PORT}, timeout=.5)
+                        requests.put('http://' + gossip_process_port + '/gossip', {"cur_store":store_to_JSON(), "sender": IP_PORT}, timeout=.5)
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         pass
 
@@ -132,7 +132,7 @@ class Entry:
     payload = {} # The Vector Clock for this variable
     timestamp = 0
 
-    # This constructor takes a timestamp if given and creates a new entry with the same timestamp
+    # This constructor takes a timestamp if given and creates a new Entry with the same timestamp
     # otherwise sets timestamp to datetime
     def __init__(self, value, payload, timestamp=datetime.datetime.now()):
         self.timestamp = timestamp
@@ -215,7 +215,7 @@ def JSON_to_store(json_store):
     json_store = json.loads(json_store)
     for key, value in json_store.items():
         value['timestamp'] = datetime.datetime.strptime(value['timestamp'], '%Y-%m-%d %H:%M:%S.%f')
-        temp_store[key] = entry(value['value'], value['payload'], value['timestamp'])
+        temp_store[key] = Entry(value['value'], value['payload'], value['timestamp'])
     return temp_store
 
 def compare_stores(other):
@@ -225,7 +225,7 @@ def compare_stores(other):
         other = json.loads(other)
     for key, value in other.items():
         if key not in store:
-            store[key] = entry(value['value'], value['payload'])
+            store[key] = Entry(value['value'], value['payload'])
         else:
             # returns -1 if we won, 1 if they won
             value['timestamp'] = datetime.datetime.strptime(value['timestamp'], '%Y-%m-%d %H:%M:%S.%f')
@@ -234,7 +234,7 @@ def compare_stores(other):
             # if we won, do nothing.
             # if they won, copy the value into our store.
             if VC_compare == 1:
-                store[key] = entry(value['value'], value['payload'], value['timestamp'])
+                store[key] = Entry(value['value'], value['payload'], value['timestamp'])
 
 
 #####################################################################
@@ -403,7 +403,7 @@ def kvs_put(key):
             # this is a VC
             entry_payload = {IP_PORT:0}
 
-            store[key] = entry(value, entry_payload)
+            store[key] = Entry(value, entry_payload)
             clientDict[key] = entry_payload
 
             response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': clientDict}), 200)
@@ -432,7 +432,7 @@ def kvs_delete(key):
                 url = 'http://' + node + '/keyValue-store/' + key
                 try:
                     # forward return whatever response.                        
-                    r = requests.delete(url, {'payload': clientDict}, timeout=.5)
+                    r = requests.delete(url, data={'payload': clientDict}, timeout=.5)
                     return r
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     continue
@@ -483,8 +483,8 @@ def shard_init_receive():
         response.headers['Content-Type'] = 'application/json'
         return response        
     else:
-        response = make_respose(400)
-        response.headers['Content-Type'] = 'application/json'
+        response = make_response("not in my view", 400)
+        response.headers['Content-Type'] = 'application/plain'
         return response
 
 # When the number of shards in changed call this function on one node from each shard
@@ -495,15 +495,18 @@ def shard_init_receive():
 # Endpoint takes an argument of 'shards' which contians the new Shards list that it should adopt
 @app.route('/shard/rebalance_primary', methods=['PUT'])
 def shard_rebalance_primary():
+    global do_gossip 
     do_gossip = False
 
     # Set internal view of shards to be what was given to us
     # TODO: json.loads?
-    Shards = flack_request.values.get('shards')
+    global Shards
+    Shards = json.loads(flask_request.values.get('shards'))
     for i,shard in enumerate(Shards):
         if IP_PORT in shard:
             Shard_Id = i 
             break
+    global SHARD_COUNT
     SHARD_COUNT = len(Shards)
 
     #Get the store of every node in my new shard
@@ -523,7 +526,7 @@ def shard_rebalance_primary():
             r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=.5)
     
     #After I update my store tell all the nodes in my shard to set their store to mine
-    for node in Shards[Shard_ID]:
+    for node in Shards[Shard_Id]:
         r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': Shards}, timeout=.5)
     # I'm finally done and can resume gossiping my data around
     do_gossip = True
@@ -531,6 +534,7 @@ def shard_rebalance_primary():
 # the primary node
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
+    global do_gossip
     do_gossip = False
     response = make_response(jsonify({'store':store_to_JSON()}),200)
     response.headers['Content-Type'] = 'application/json'
@@ -540,14 +544,22 @@ def shard_rebalance_secondary():
 @app.route('/shard/setStore', methods=['PUT'])
 def shard_setStore():
     # TODO: might need a json.loads here
+    global Shards
+    global SHARD_COUNT
+    global do_gossip
+    global Shard_Id
+    global store
+
     newStore = flask_request.values.get('store')
     
     #Set internal view of shards to be what was given to us
-    Shards = flack_request.values.get('shards')
+    
+    Shards = flask_request.values.get('shards')
     for i,shard in enumerate(Shards):
         if IP_PORT in shard:
             Shard_Id = i 
             break
+    
     SHARD_COUNT = len(Shards)
     
     #TODO: is this actually correct?
@@ -691,7 +703,7 @@ def view_put():
 
             # add this to shards array.
             VIEW.add(new_node)
-            new_sid = addToShards(new_node)
+            addToShards(new_node)
 
             # broadcast to every node except this one
             # send our new partitions array so that they can update as well
@@ -699,7 +711,8 @@ def view_put():
                 tries = 0
                 while (tries < 3):
                     try:
-                        r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node, 'pid': new_sid, 'shard_view': Shards}, timeout=0.5)
+                        # r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node, 'pid': new_sid, 'shard_view': Shards}, timeout=0.5)
+                        r = requests.put('http://' + node + '/view/update/ack', {'ip_port': new_node, 'shard_view': json.dumps(Shards)}, timeout=0.5)
                         if r.text == "OK":
                             break
                         else:
@@ -741,7 +754,7 @@ def view_delete():
                 tries = 0
                 while (tries < 3):
                     try:
-                        r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node, 'shard_view': Shards}, timeout=0.5)
+                        r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node, 'shard_view': json.dumps(Shards)}, timeout=0.5)
                         if r.text == "OK":
                             break
                         else:
@@ -768,15 +781,19 @@ def view_update_ack():
         new_view = flask_request.values.get('ip_port')
         # if this is the new node, set its shard id to be
         # the one assigned by the existing cluster.
-        if IP_PORT == new_view:
-            Shard_Id = flask_request.values.get('pid')
+        # if IP_PORT == new_view:
+        #     Shard_Id = flask_request.values.get('pid')
         
         # should updating the shards be in this conditional?
         if new_view not in VIEW:
             VIEW.add(new_view)
 
-        Shards = flask_request.values.get('shard_view')
-
+        new_Shards = json.loads(flask_request.values.get('shard_view'))
+        print(new_Shards)
+        if new_Shards:
+            global Shards
+            Shards = new_Shards
+            print('set Shards to', Shards)
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
         return response
@@ -786,9 +803,12 @@ def view_update_ack():
 def view_delete_ack():
     if not waiting:
         new_view = flask_request.values.get('ip_port')
+        global Shards
+        global store
+
         if new_view in VIEW:
             VIEW.remove(new_view)
-            Shards = flask_request.values.get('shard_view')
+            Shards = json.loads(flask_request.values.get('shard_view'))
         # check the new Shards to see if I was moved from one shard to another
         for partition_num, partition in enumerate(Shards):
             if IP_PORT in partition:
@@ -800,6 +820,7 @@ def view_delete_ack():
         if not new_shard_list:
             print("we fucked up lmaooo")
         Shards = new_shard_list
+
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
         # loop through shard partitions to find self
@@ -830,41 +851,60 @@ def gossip():
 ######################          MAIN        #########################
 #####################################################################
 
-def all_empty():
-    for partition in Shards:
+def all_empty(new_shards):
+    if not new_shards:
+        print("We fucked up again lmaoooo\n")
+        return True
+    for partition in new_shards:
         if len(partition) > 0:
             return False
     return True
 
 if __name__ == "__main__":
-    empty = True
-    for server in VIEW - {IP_PORT}:     
-        tries = 0
-        while tries < 3:
-            try:
-                r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
-                if r.status_code == 400:
-                    waiting = True
-                    break
-                elif r.status_code == 200 and not all_empty():
-                    # TODO: eugene rewrites the his code that baiwen deleted xdddd
-                    empty = False
-                    new_shards = r.json()["shards"]            
-                    if not new_shards:
-                        print("We fucked up again lmaoooo")
-                    Shards = new_shards 
-            except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                # we assume that if we can't reach them that they aren't up
-                tries += 1
-                
-    # do round robin
-    if empty:
-        temp_view = VIEW
-        for port_count, port in enumerate(sorted(temp_view)):
-            Shards[port_count % SHARD_COUNT].append(port)
-            if port == IP_PORT:
-                Shard_Id = port_count % SHARD_COUNT
-                print(Shard_Id)
+    waiting = True
+    while waiting:
+        print('looping init\n')
+        waiting = False
+        empty = True
+        for server in VIEW - {IP_PORT}:     
+            tries = 0
+            while tries < 3:
+                try:
+                    r = requests.get('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
+                    print("requesting", server)
+                    print(r.status_code)
+                    print(r.text)
+                    if r.status_code == 400:
+                        print('blocked on a server\n')
+                        waiting = True
+                        empty = False
+                        break
+                    elif r.status_code == 200 and not all_empty(r.json()["shards"]):
+                        # TODO: eugene rewrites the his code that baiwen deleted xdddd
+                        empty = False 
+                        #global Shards       
+                        Shards = r.json()["shards"]
+                        for i,shard in enumerate(Shards):
+                            if IP_PORT in shard:
+                                Shard_Id = i
+                        break
+                    tries += 1
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    # we assume that if we can't reach them that they aren't up
+                    tries += 1
+                    time.sleep(.2)
+                    
+        # do round robin
+        if empty:
+            temp_view = VIEW
+            for port_count, port in enumerate(sorted(temp_view)):
+                Shards[port_count % SHARD_COUNT].append(port)
+                if port == IP_PORT:
+                    Shard_Id = port_count % SHARD_COUNT
+                    print(Shard_Id)
+        
+        # wait 200 milliseconds
+        time.sleep(.2)
 
     
     print(Shards)
