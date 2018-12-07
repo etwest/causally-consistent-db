@@ -28,6 +28,8 @@ Shard_Id = None
 #Variable to control whether or not this node should be sending or accepting gossip requests
 do_gossip = True
 
+waiting = False
+
 # Adding a node to a shard
 # Will add the node to the shard with the fewest nodes
 # ip_port is the new node to add to Shards
@@ -475,8 +477,8 @@ def shard_update_store():
 
 @app.route('/shard/init_receive', methods=['GET'])
 def shard_init_receive():
-    payload = flask_request.values.get('ip_port')
-    if payload in VIEW:
+    oth_ip_port = flask_request.values.get('ip_port')
+    if oth_ip_port in VIEW:
         response = make_response(jsonify({'shards':Shards}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response        
@@ -557,7 +559,7 @@ def shard_setStore():
 
 # used to merge the internal store of a node with new data
 @app.route('/shard/updateStore', methods=['PUT'])
-def shard_setStore():
+def shard_updateStore():
     # TODO: might need a json.loads here
     newStore = flask_request.values.get('store')
     
@@ -588,6 +590,7 @@ def shard_get_all():
 def shard_get_members(shard_id):
     if not waiting:
         # invalid shard id
+        shard_id = int(shard_id)
         if shard_id not in range(0,len(Shards)):
             response = make_response(jsonify({'result':'Error', 'msg': 'No shard with id ' + str(shard_id)}), 404)
             response.headers['Content-Type'] = 'application/json'
@@ -602,6 +605,7 @@ def shard_get_count(shard_id):
     if not waiting:
 
         # if invalid shard id
+        shard_id = int(shard_id)
         if shard_id not in range(0,len(Shards)):
             response = make_response(jsonify({'result':'Error', 'msg': 'No shard with id ' + str(shard_id)}), 404)
             response.headers['Content-Type'] = 'application/json'
@@ -623,7 +627,7 @@ def shard_get_count(shard_id):
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     tries += 1
 
-@app.route('shard/changeShardNumber', methods=['PUT'])
+@app.route('/shard/changeShardNumber', methods=['PUT'])
 def shard_change_num():
     if not waiting:
         shardNum = flask_request.values.get('num')
@@ -834,25 +838,38 @@ def all_empty():
 
 if __name__ == "__main__":
     empty = True
-    for server in VIEW:        
-        r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
-        if r.status_code == 400:
-            waiting = True
-            break
-        elif r.status_code == 200 and not all_empty():
-            # TODO: eugene rewrites the his code that baiwen deleted xdddd
-            empty = False
-            new_shards = r.json()["shards"]            
-            if not new_shards:
-                print("We fucked up again lmaoooo")
-            Shards = new_shards                    
-            
+    for server in VIEW - {IP_PORT}:     
+        tries = 0
+        while tries < 3:
+            try:
+                r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
+                if r.status_code == 400:
+                    waiting = True
+                    break
+                elif r.status_code == 200 and not all_empty():
+                    # TODO: eugene rewrites the his code that baiwen deleted xdddd
+                    empty = False
+                    new_shards = r.json()["shards"]            
+                    if not new_shards:
+                        print("We fucked up again lmaoooo")
+                    Shards = new_shards 
+            except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                # we assume that if we can't reach them that they aren't up
+                tries += 1
+                
     # do round robin
     if empty:
-        for port_count, port in enumerate(VIEW):
+        temp_view = VIEW
+        for port_count, port in enumerate(sorted(temp_view)):
             Shards[port_count % SHARD_COUNT].append(port)
+            if port == IP_PORT:
+                Shard_Id = port_count % SHARD_COUNT
+                print(Shard_Id)
+
     
-    g = gossip_thread()
+    print(Shards)
+    print(Shard_Id)
+    g = Gossip_thread()
     #TODO: make init function that broadcasts to all other nodes,
     g.start()
     app.run(host="0.0.0.0", port=8080, threaded=True)
