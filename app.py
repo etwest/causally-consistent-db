@@ -19,7 +19,7 @@ app = Flask(__name__)
 MB = 1000000
 IP_PORT = os.getenv('IP_PORT')
 VIEW = set(os.getenv('VIEW').split(','))
-SHARD_COUNT = os.getenv('S')
+SHARD_COUNT = int(os.getenv('S'))
 
 store = {}
 Shards = [[] for _ in range(SHARD_COUNT)]
@@ -459,7 +459,7 @@ def kvs_delete(key):
 #####################################################################
 def shard_update_store():
     # Create a list of dictionaries, each dictionary refers to the data that will be transferred another Shard
-    diff=[{} for _ in Shards]
+    diff = [{} for _ in Shards]
     #Loop through our store and figure out what stays and what moves
     for key, entry in store.items():
         # key_hash tells us where entry belongs
@@ -515,7 +515,7 @@ def shard_rebalance_primary():
     diff = shard_update_store()
    
     # send the data that I am no longer responsible for to the Shards who are now responsible for it
-    for i,shard in enumerate(diff):
+    for i, shard in enumerate(diff):
         # exclude all empty lists (no need to send no data) and my own Shard
         if len(shard) > 0:
             r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=.5)
@@ -628,9 +628,18 @@ def shard_change_num():
     if not waiting:
         shardNum = flask_request.values.get('num')
         if shardNum <= SHARD_COUNT:
-            print("nothing")
+            print ("nothing")
             #Then we are reducing the number of shards which won't cause errors
             #will need to do some rebalancing
+            #TODO: destroy the last new_shardNum nodes and redistribute to
+            # the beginnning shardNum nodes round robin style
+#           new_shardNum = SHARD_COUNT - shardNum
+#           SHARD_COUNT = 
+#           for i in range(0,new_shardNum): # iterates through shards to be destroyed
+#               for node in reversed(Shards[i]): # destroys and adds nodes to new lists
+#                   Shards[i].pop(node)
+
+
         else:
             #Check for errors
             if shardNum > len(VIEW):
@@ -817,13 +826,32 @@ def gossip():
 ######################          MAIN        #########################
 #####################################################################
 
+def all_empty():
+    for partition in Shards:
+        if len(partition) > 0:
+            return False
+    return True
+
 if __name__ == "__main__":
-    for server in VIEW:
+    empty = True
+    for server in VIEW:        
         r = requests.put('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
         if r.status_code == 400:
             waiting = True
-        elif r.status_code == 200 and Shards:
+            break
+        elif r.status_code == 200 and not all_empty():
             # TODO: eugene rewrites the his code that baiwen deleted xdddd
+            empty = False
+            new_shards = r.json()["shards"]            
+            if not new_shards:
+                print("We fucked up again lmaoooo")
+            Shards = new_shards                    
+            
+    # do round robin
+    if empty:
+        for port_count, port in enumerate(VIEW):
+            Shards[port_count % SHARD_COUNT].append(port)
+    
     g = gossip_thread()
     #TODO: make init function that broadcasts to all other nodes,
     g.start()
