@@ -116,7 +116,6 @@ class Gossip_thread(Thread):
         while not self.stopped:
             if do_gossip:                        
                 time.sleep(.2)                                       # sleep for 200 milliseconds
-                #temp_view = VIEW.copy()
                 temp_view = set(Shards[Shard_Id])
                 if len(temp_view) > 1:
                     temp_view.remove(IP_PORT)                    # remove self from view temporarily
