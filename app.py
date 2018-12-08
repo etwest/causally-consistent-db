@@ -626,7 +626,6 @@ def shard_get_members(shard_id):
 @app.route('/shard/count/<shard_id>', methods=['GET'])
 def shard_get_count(shard_id):
     if not waiting:
-
         # if invalid shard id
         shard_id = int(shard_id)
         if shard_id not in range(0,len(Shards)):
@@ -655,12 +654,27 @@ def shard_change_num():
         if newshardNum <= SHARD_COUNT:
             #Then we are reducing the number of shards which won't cause errors
             #will need to do some rebalancing
+            x=0
             deleted_shards_count = SHARD_COUNT - newshardNum
             for i in range(0,deleted_shards_count): # iterates through shards to be destroyed
-                for x,node in enumerate(reversed(Shards[i])): # destroys and adds nodes to new lists
-                    Shards[i].pop(node)
+                for node in reversed(Shards[i]): # destroys and adds nodes to new lists
+                    node = Shards[i].pop(0)
                     Shards[x%newshardNum].append(node)
+                    x+=1
                     # hash and add to shard at hashed
+            # TODO: Create a response
+            ids = '0'
+            for i in range(1, len(Shards)):
+                ids += ","+str(i) 
+            response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
+            return response    
+        elif newshardNum == SHARD_COUNT:
+            # TODO: Create a response 
+            ids = "0"
+            for i in range(1, len(Shards)):
+                ids += ","+str(i) 
+            response = make_response(jsonify({'result': 'Success', 'shard_ids': ids}), 200)
+            return response
         else:
             #Check for errors
             if newshardNum > len(VIEW):
@@ -673,11 +687,26 @@ def shard_change_num():
                 response = make_response(jsonify({'result': 'Error', 'msg': 'Not enough nodes. ' + str(newshardNum) + ' shards result in a nonfault tolerant shard'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
-            for i in range(0,SHARD_COUNT-newshardNum):
+            # TODO: add new Shard to Shards
+            for i in range(0,newshardNum-SHARD_COUNT):
+                Shards.append([])
+            
+            def existsSmallShard():
+                minNodes = int(len(VIEW) / newshardNum)
+                for shard in Shards:
+                    if len(shard) < minNodes:
+                        return True
+                return False
+            while (existsSmallShard()):
                 moveFromHighestToLowest()                                                                    
             #If we've gotten to this point then it's time to redistribute the nodes/data
             # we want to take from the highest and give to the lowest until all nodes are equal
-    
+            # TODO: Create a response 
+            ids = '0'
+            for i in range(1, len(Shards)):
+                ids += ","+str(i) 
+            response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
+            return response                            
 def moveFromHighestToLowest():
     # pop node from highest length shard
     # put in lowest length shard the new node
