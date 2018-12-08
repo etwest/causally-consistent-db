@@ -12,6 +12,8 @@ import sys
 import copy
 import threading
 import collections
+import hashlib
+import broadcast
 
 app = Flask(__name__)
 
@@ -97,6 +99,15 @@ def removeFromShards(ip_port):
         return False
     return True
 
+# count how many pairs are in store,
+# disregarding tombstones
+def len_shard():
+    count = 0
+    for _, entry in store.items():
+        if entry.value is not None:
+            count += 1
+
+    return count
 
 #####################################################################
 ###################           Classes           #####################
@@ -115,7 +126,7 @@ class Gossip_thread(Thread):
         # gossip every 125 milliseconds
         while not self.stopped:
             if do_gossip:                        
-                time.sleep(.2)                                       # sleep for 200 milliseconds
+                time.sleep(.4)                                       # sleep for 400 milliseconds
                 temp_view = set(Shards[Shard_Id])
                 if len(temp_view) > 1:
                     temp_view.remove(IP_PORT)                    # remove self from view temporarily
@@ -277,7 +288,8 @@ def kvs_get(key):
         # key doesn't exist, return error
         else:
             # this is the shard that's supposed to own it.
-            if shard_hash(key) == Shard_Id:            
+            if shard_hash(key) == Shard_Id:
+                # print(str(shard_hash(key)) + ' ' + str(Shard_Id))          
                 response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
@@ -289,7 +301,7 @@ def kvs_get(key):
                     try:
                         # forward return whatever response.                        
                         r = requests.get(url, clientDict, timeout=.5)
-                        return r
+                        return (r.content, r.status_code, r.headers.items())
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
@@ -309,7 +321,7 @@ def kvs_search(key):
             clientDict = json.loads(payload)
         # if the key exists, return true, otherwise return false
         if key in store and store[key].value != None:
-            response = make_response(jsonify({'result':'Success', 'isExists':True, 'payload':clientDict}), 200)
+            response = make_response(jsonify({'result':'Success', 'isExists':True, 'owner': Shard_Id, 'payload':clientDict}), 200)
             response.headers['Content-Type'] = 'application/json'
             return response
         else:
@@ -326,7 +338,7 @@ def kvs_search(key):
                     try:
                         # forward return whatever response.                        
                         r = requests.get(url, {'payload': clientDict}, timeout=.5)
-                        return r
+                        return (r.content, r.status_code, r.headers.items())
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
@@ -360,7 +372,7 @@ def kvs_put(key):
                 try:
                     # forward return whatever response.                        
                     r = requests.put(url, {'payload': clientDict, 'val': value}, timeout=.5)
-                    return r
+                    return (r.content, r.status_code, r.headers.items())
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     continue
 
@@ -432,7 +444,7 @@ def kvs_delete(key):
                 try:
                     # forward return whatever response.                        
                     r = requests.delete(url, data={'payload': clientDict}, timeout=.5)
-                    return r
+                    return (r.content, r.status_code, r.headers.items())
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     continue
             
@@ -622,58 +634,71 @@ def shard_get_count(shard_id):
             response.headers['Content-Type'] = 'application/json'
             return response
         if shard_id == Shard_Id: #If requested shard ID is us
-            response = make_response(jsonify({'result': 'Success', 'count': len(store)}, 200))
+            response = make_response(jsonify({'result': 'Success', 'count': len_shard()}, 200))
             response.headers['Content-Type'] = 'application/json'
             return response
         else: # If requested shard ID is one of the other shards
             tries = 0
-            while tries < 2:
+            while tries < 3:
                 send_to = sample(Shards[shard_id], 1)[0]
                 try:
                     # forward the request
-                    r = requests.get('http://' + send_to + '/shard/count/', timeout=.5)
-                    response = make_response(r.text, r.status_code)
-                    response.headers['Content-Type'] = 'application/json'
-                    return response
+                    r = requests.get('http://' + send_to + '/shard/count/'+str(shard_id), timeout=.5)
+                    return (r.content, r.status_code, r.headers.items())
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     tries += 1
 
 @app.route('/shard/changeShardNumber', methods=['PUT'])
 def shard_change_num():
     if not waiting:
-        shardNum = flask_request.values.get('num')
-        if shardNum <= SHARD_COUNT:
-            print ("nothing")
+        newshardNum = flask_request.values.get('num')
+        if newshardNum <= SHARD_COUNT:
             #Then we are reducing the number of shards which won't cause errors
             #will need to do some rebalancing
-            #TODO: destroy the last new_shardNum nodes and redistribute to
-            # the beginnning shardNum nodes round robin style
-#           new_shardNum = SHARD_COUNT - shardNum
-#           SHARD_COUNT = 
-#           for i in range(0,new_shardNum): # iterates through shards to be destroyed
-#               for node in reversed(Shards[i]): # destroys and adds nodes to new lists
-#                   Shards[i].pop(node)
-
-
+            deleted_shards_count = SHARD_COUNT - newshardNum
+            for i in range(0,deleted_shards_count): # iterates through shards to be destroyed
+                for x,node in enumerate(reversed(Shards[i])): # destroys and adds nodes to new lists
+                    Shards[i].pop(node)
+                    Shards[x%newshardNum].append(node)
+                    # hash and add to shard at hashed
         else:
             #Check for errors
-            if shardNum > len(VIEW):
-                response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(shardNum)+'shards'}), 400) 
+            if newshardNum > len(VIEW):
+                response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(newshardNum)+'shards'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
             # we should have at least 2 nodes per shard to be fault tolerant
             # doesn't make sense to have 0
-            if len(VIEW) / shardNum < 2: 
-                response = make_response(jsonify({'result': 'Error', 'msg': 'Not enough nodes. ' + str(shardNum) + ' shards result in a nonfault tolerant shard'}), 400) 
+            if len(VIEW) / newshardNum < 2: 
+                response = make_response(jsonify({'result': 'Error', 'msg': 'Not enough nodes. ' + str(newshardNum) + ' shards result in a nonfault tolerant shard'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
+            for i in range(0,SHARD_COUNT-newshardNum):
+                moveFromHighestToLowest()                                                                    
             #If we've gotten to this point then it's time to redistribute the nodes/data
+            # we want to take from the highest and give to the lowest until all nodes are equal
     
-    
-
+def moveFromHighestToLowest():
+    # pop node from highest length shard
+    # put in lowest length shard the new node
+    imax = 0 
+    nmax = -1
+    imin = 0
+    nmin = -1
+    for i, shard in enumerate(Shards):
+        if len(shard) < nmin:
+            nmin=len(shard)
+            imin=i        
+        if len(shard) > nmax:
+            nmax = len(shard)
+            imax = i
+    node = Shards[imax].pop(0)
+    Shards[imin].append(node)    
 # hash a key to its shard
 def shard_hash(value):
-    return hash(value) % len(Shards)        
+    m = hashlib.md5()
+    m.update(value.encode())
+    return int(m.hexdigest(), 16) % len(Shards)
 
 #####################################################################
 ###################          View Stuff         #####################
@@ -719,6 +744,10 @@ def view_put():
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         tries += 1
                         continue
+            # urls = []
+            # for node in VIEW - {IP_PORT}:
+            #     urls.append(node + 'view/updata/ack')                
+            # broadcast.put_broadcast(, .5)            
 
             # first, add the new node to our view.
             # then, find the partition with least number of nodes
@@ -733,6 +762,7 @@ def view_put():
 @app.route('/view', methods=['DELETE'])
 def view_delete():
     if not waiting:
+        global Shards
         new_node = flask_request.values.get('ip_port')
 
         if new_node not in VIEW:
@@ -807,17 +837,16 @@ def view_delete_ack():
 
         if new_view in VIEW:
             VIEW.remove(new_view)
-            Shards = json.loads(flask_request.values.get('shard_view'))
         # check the new Shards to see if I was moved from one shard to another
+        new_shard_list = json.loads(flask_request.values.get('shard_view'))
+        if not new_shard_list:
+            print("we fucked up lmaooo")
         for partition_num, partition in enumerate(Shards):
             if IP_PORT in partition:
-                # found ourselves in partition
+                # If our shard number was changed which means we moved shards... delete our store
                 if partition_num != Shard_Id:
                     store = {}
                 break
-        new_shard_list = json.loads(flask_request.values.get('shards'))
-        if not new_shard_list:
-            print("we fucked up lmaooo")
         Shards = new_shard_list
 
         response = make_response("OK")
