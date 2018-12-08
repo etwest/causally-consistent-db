@@ -511,7 +511,7 @@ def shard_init_receive():
 # This change needs to be propogated in a very safe and specific manner
 # Endpoint takes an argument of 'shards' which contians the new Shards list that it should adopt
 @app.route('/shard/rebalance_primary', methods=['PUT'])
-def shard_rebalance_primary(new_shards=None):
+def shard_rebalance_primary():
     global do_gossip
     global Shards
     global SHARD_COUNT
@@ -519,12 +519,21 @@ def shard_rebalance_primary(new_shards=None):
     do_gossip = False
 
     # Set internal view of shards to be what was given to us
-    # TODO: json.loads?
-    if not new_shards:
-        Shards = json.loads(flask_request.values.get('shards'))
-    else:
-        Shards = new_shards
+    #print('new_shards:',new_shards)
+    print('given shards:', flask_request.values.get('shards'))
 
+    #new_sh = json.loads(new_shards)
+
+    # if new_shards is None:
+    #     shards = json.loads(flask_request.values.get('shards'))
+    #     if shards: #some basic error checking
+    #         Shards = shards
+    # else:
+    #     Shards = new_shards
+
+    Shards = json.loads(flask_request.values.get('shards'))
+
+    # get new shard id
     for i, shard in enumerate(Shards):
         if IP_PORT in shard:
             Shard_Id = i 
@@ -534,6 +543,7 @@ def shard_rebalance_primary(new_shards=None):
 
     #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
+        print('denoting', node, 'as secondary')
         # pull the store out of r and perform a comparison/update of our store with the other store
         r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=0.5)
         oth_store = r.json()['store']
@@ -724,18 +734,20 @@ def shard_change_num():
                 
         # broadcast to everyone else 
         for shard_count, shard in enumerate(Shards):
-            if shard_count != Shard_Id:
-                tries = 0
-                while tries < 3:                
-                    try:
-                        print("trying to broadcast")                    
-                        requests.put("http://%s/shard/rebalance_primary" % shard[0], {"shard": json.dumps(Shards)}, timeout=0.5)
-                        break
-                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                        tries += 1
+            #if shard_count != Shard_Id:
+            print(Shards)
+            print(json.dumps(Shards))
+            tries = 0
+            while tries < 3:
+                try:
+                    print("trying to broadcast")                    
+                    requests.put('http://' + shard[0] + '/shard/rebalance_primary', {'shards': json.dumps(Shards)}, timeout=2)
+                    break
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    tries += 1
         
         #rebalance our shard using us as primary
-        shard_rebalance_primary(Shards)
+        # shard_rebalance_primary(json.dumps(Shards))
 
         ids = "0"
         for i in range(1, len(Shards)):
