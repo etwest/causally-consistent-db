@@ -15,8 +15,7 @@ EXPOSE 8080
 # Define environment variable
 ENV NAME World \
     MAINIP \
-    IP \
-    PORT
+    IP_PORT
 
 # Run app.py when the container launches
 CMD ["python3", "app.py"]

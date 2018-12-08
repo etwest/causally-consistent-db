@@ -9,7 +9,7 @@ import docker_control
 
 import io
 
-dockerBuildTag = "testing" #put the tag for your docker build here
+dockerBuildTag = "hw4" #put the tag for your docker build here
 
 hostIp = "localhost" 
 
@@ -19,9 +19,9 @@ needSudo = False # obviously if you need sudo, set this to True
 
 port_prefix = "808"
 
-networkName = "mynetwork" # the name of the network you created
+networkName = "mynet" # the name of the network you created
 
-networkIpPrefix = "192.168.0." # should be everything up to the last period of the subnet you specified when you 
+networkIpPrefix = "10.0.0." # should be everything up to the last period of the subnet you specified when you 
 # created your network
 
 propogationTime = 3 #sets number of seconds we sleep after certain actions to let data propagate through your system

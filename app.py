@@ -15,6 +15,7 @@ import collections
 import hashlib
 import broadcast
 
+
 app = Flask(__name__)
 
 # global variables
@@ -30,7 +31,7 @@ Shard_Id = None
 #Variable to control whether or not this node should be sending or accepting gossip requests
 do_gossip = True
 
-waiting = False # will be set to false right after initial init
+waiting = False
 
 # Adding a node to a shard
 # Will add the node to the shard with the fewest nodes
@@ -206,6 +207,7 @@ class Entry:
         return 1 # they win                            
 
 # formats our store properly so it can be sent with a message
+# {"value": val, "timestamp": time, "payload": VC}
 def store_to_JSON():
     json_store = store.copy()
     for key, entry in json_store.items():
@@ -509,25 +511,31 @@ def shard_init_receive():
 # This change needs to be propogated in a very safe and specific manner
 # Endpoint takes an argument of 'shards' which contians the new Shards list that it should adopt
 @app.route('/shard/rebalance_primary', methods=['PUT'])
-def shard_rebalance_primary():
-    global do_gossip 
+def shard_rebalance_primary(new_shards=None):
+    global do_gossip
+    global Shards
+    global SHARD_COUNT
+    global Shard_Id
     do_gossip = False
 
     # Set internal view of shards to be what was given to us
     # TODO: json.loads?
-    global Shards
-    Shards = json.loads(flask_request.values.get('shards'))
-    for i,shard in enumerate(Shards):
+    if not new_shards:
+        Shards = json.loads(flask_request.values.get('shards'))
+    else:
+        Shards = new_shards
+
+    for i, shard in enumerate(Shards):
         if IP_PORT in shard:
             Shard_Id = i 
             break
-    global SHARD_COUNT
+            
     SHARD_COUNT = len(Shards)
 
     #Get the store of every node in my new shard
     for node in Shards[Shard_Id]:
         # pull the store out of r and perform a comparison/update of our store with the other store
-        r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=.5)
+        r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=0.5)
         oth_store = r.json()['store']
         compare_stores(oth_store)
     
@@ -538,15 +546,16 @@ def shard_rebalance_primary():
     for i, shard in enumerate(diff):
         # exclude all empty lists (no need to send no data) and my own Shard
         if len(shard) > 0:
-            r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=.5)
+            r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=0.5)
     
     #After I update my store tell all the nodes in my shard to set their store to mine
     for node in Shards[Shard_Id]:
-        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': Shards}, timeout=.5)
+        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': json.dumps(Shards)}, timeout=.5)
     # I'm finally done and can resume gossiping my data around
     do_gossip = True
+    return
 
-# the primary node
+# the secondary nodes
 @app.route('/shard/rebalance_secondary', methods=['GET'])
 def shard_rebalance_secondary():
     global do_gossip
@@ -567,10 +576,10 @@ def shard_setStore():
 
     newStore = flask_request.values.get('store')
     
-    #Set internal view of shards to be what was given to us
+    # Set internal view of shards to be what was given to us
     
-    Shards = flask_request.values.get('shards')
-    for i,shard in enumerate(Shards):
+    Shards = json.loads(flask_request.values.get('shards'))
+    for i, shard in enumerate(Shards):
         if IP_PORT in shard:
             Shard_Id = i 
             break
@@ -587,7 +596,6 @@ def shard_setStore():
 # used to merge the internal store of a node with new data
 @app.route('/shard/updateStore', methods=['PUT'])
 def shard_updateStore():
-    # TODO: might need a json.loads here
     newStore = flask_request.values.get('store')
     
     compare_stores(newStore)
@@ -664,39 +672,22 @@ def shard_change_num():
         global SHARD_COUNT
         global Shards
         newshardNum = int(flask_request.values.get('num'))
-        if newshardNum <= SHARD_COUNT:
+        if newshardNum <= SHARD_COUNT:  
+            print("decreasing shards...")
             # Then we are reducing the number of shards which won't cause errors
             # will need to do some rebalancing
-            x = 0
-            deleted_shards_count = SHARD_COUNT - newshardNum
-            for i in range(0, deleted_shards_count): # iterates through shards to be destroyed
-                shard = Shards.pop(len(Shards)) # pops the last shard
-                for n in range(len(shard)): # iterates through nodes in shard
-                    node = shard.pop(i) 
-                    Shards[x%newshardNum].append(node) # round robin adds to non deleted lists
-                    x+=1                                                        
+            old_shards = []
+            while len(Shards) > newshardNum:
+                old_shards.append(Shards.pop()) 
+                  
+            for shard in old_shards:
+                for node in shard:
+                    addToShards(node)     
+
             SHARD_COUNT = newshardNum
-            ids = '0'
-
-            # create the list of shard ids for response
-            for i in range(1, len(Shards)):
-                ids += "," + str(i)
-
-            response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
-            response.headers['Content-Type'] = 'application/json'
-            return response
-        
-        # if the number to change to is the same as what we have now,
-        # we don't need to do anything.
-        elif newshardNum == SHARD_COUNT:
-            ids = "0"
-            for i in range(1, len(Shards)):
-                ids += "," + str(i) 
-            response = make_response(jsonify({'result': 'Success', 'shard_ids': ids}), 200)
-            response.headers['Content-Type'] = 'application/json'
-            return response
-        else:
-            #Check for errors
+        elif newshardNum > SHARD_COUNT:
+            print("increasing shards...")
+            # Check for errors
             if newshardNum > len(VIEW):
                 response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(newshardNum)+'shards'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
@@ -708,35 +699,59 @@ def shard_change_num():
                 response.headers['Content-Type'] = 'application/json'
                 return response
             
-            for i in range(0,newshardNum-SHARD_COUNT):
+            for i in range(newshardNum - SHARD_COUNT):
                 Shards.append([])
             
             def existsSmallShard():
                 minNodes = int(len(VIEW) / newshardNum)
+                print(minNodes)
                 for shard in Shards:
+                    print(len(shard))
                     if len(shard) < minNodes:
                         return True
                 return False
+                
             while (existsSmallShard()):
-                moveFromHighestToLowest()                                                                    
-            #If we've gotten to this point then it's time to redistribute the nodes/data
+                moveFromHighestToLowest()     
+            # If we've gotten to this point then it's time to redistribute the nodes/data
             # we want to take from the highest and give to the lowest until all nodes are equal
             SHARD_COUNT = newshardNum
-            ids = '0'
-            for i in range(1, len(Shards)):
-                ids += ","+str(i) 
-            response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
-            response.headers['Content-Type'] = 'application/json'
-            return response
+
+        #update our Shard_Id
+        for i, shard in enumerate(Shards):
+            if IP_PORT in shard:
+                Shard_Id = i
+                
+        # broadcast to everyone else 
+        for shard_count, shard in enumerate(Shards):
+            if shard_count != Shard_Id:
+                tries = 0
+                while tries < 3:                
+                    try:
+                        print("trying to broadcast")                    
+                        requests.put("http://%s/shard/rebalance_primary" % shard[0], {"shard": json.dumps(Shards)}, timeout=0.5)
+                        break
+                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                        tries += 1
         
-                                    
+        #rebalance our shard using us as primary
+        shard_rebalance_primary(Shards)
+
+        ids = "0"
+        for i in range(1, len(Shards)):
+            ids += "," + str(i) 
+        response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
 def moveFromHighestToLowest():
     # pop node from highest length shard
     # put in lowest length shard the new node
+    #print("moving from highest to lowest...")
     imax = 0 
     nmax = -1
     imin = 0
-    nmin = -1
+    nmin = sys.maxsize
     for i, shard in enumerate(Shards):
         if len(shard) < nmin:
             nmin=len(shard)
@@ -746,6 +761,7 @@ def moveFromHighestToLowest():
             imax = i
     node = Shards[imax].pop(0)
     Shards[imin].append(node)
+
 
 # hash a key to its shard
 def shard_hash(value):
@@ -940,16 +956,13 @@ if __name__ == "__main__":
         #print('looping init\n')
         waiting = False
         empty = True
-        for server in VIEW - {IP_PORT}:     
+        for server in VIEW - {IP_PORT}:
             tries = 0
             while tries < 3:
                 try:
                     r = requests.get('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
-                    #print("requesting", server)
-                    #print(r.status_code)
-                    #print(r.text)
                     if r.status_code == 400:
-                        print('blocked on a server\n')
+                        #print('blocked on a server\n')
                         waiting = True
                         empty = False
                         break
@@ -980,7 +993,6 @@ if __name__ == "__main__":
         # wait 200 milliseconds
         time.sleep(.2)
 
-    
     print(Shards)
     print(Shard_Id)
     g = Gossip_thread()
