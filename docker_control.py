@@ -144,9 +144,9 @@ if __name__ == '__main__':
     #change these variables to change default values
     standardPortPrefix = "808"
     standardIP   = "localhost"
-    standardNetworkIPPrefix = "192.168.0."
-    standardBuildTag = "testing"
-    standardNetworkName = "mynetwork"
+    standardNetworkIPPrefix = "10.0.0."
+    standardBuildTag = "hw4"
+    standardNetworkName = "mynet"
     standardShardNumber = "2"
 
     parser = argparse.ArgumentParser(description='docker controller')

@@ -260,7 +260,13 @@ class TestHW4(unittest.TestCase):
     def checkConsistentMembership(self, ipPort, ID):
         shard = self.checkGetMembers(ipPort, ID)
         for member in shard:
-            self.assertEqual(self.checkGetMyShardId(member), ID)
+            ind = None
+            for container in self.view:
+                if container['networkIpPortAddress'] == member:
+                    ind = container
+                if ind != None:
+                    ip = ind['testScriptAddress']
+                    self.assertEqual(self.checkGetMyShardId(ip), ID)
 
 ##########################################################################
 ## Tests start here ##
@@ -291,7 +297,7 @@ class TestHW4(unittest.TestCase):
 
         shardView = self.getShardView(ipPort)
         for shard in shardView:
-            length = len(shard)
+            length = len(shardView[shard])
             self.assertTrue(length > 1)
 
     # number of shards should not change

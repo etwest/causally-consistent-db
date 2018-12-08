@@ -52,10 +52,15 @@ def addToShards(ip_port):
 # 1. one shard has less than 2 nodes
 # Function: removes a node specified by ip_port
 def removeFromShards(ip_port):
+    global SHARD_COUNT 
     # catches the case if there is 0 
+    shard_id = -1
     for i, shard in enumerate(Shards):
         if ip_port in shard:
             shard_id = i
+    if shard_id == -1:
+        print('well we fucked up')
+        return
     # If removing a shard will cause imbalance
     equalityCheck = len(Shards[shard_id]) < (len(VIEW) / SHARD_COUNT)
     twoCheck = len(Shards[shard_id]) == 2 # when we need to delete the entire shard
@@ -81,19 +86,18 @@ def removeFromShards(ip_port):
     #     first_node = Shards[shard_id][0]
     #     Shards[shard_id].remove(first_node)
     elif twoCheck:
-        #TODO: remove ip port node and move other node
-        #TODO: remove list from Shards                                                            
-        first_node = Shards[shard_id][0]
-        Shards[shard_id].remove(first_node)
-        Shards.remove(shard_id)
+        
+        first_node = Shards[shard_id].pop()
+        Shards.pop(shard_id)
 
         imin = 0 # holds index of max
-        nmin = -1 # holds value of max
+        nmin = sys.maxsize # holds value of max
         for i, shard in enumerate(Shards):
-            if len(shard) > nmin:
+            if len(shard) < nmin:
                 nmin = len(shard)
                 imin = i
         Shards[imin].append(first_node)
+        SHARD_COUNT -= 1
         return False
     return True
 
@@ -272,16 +276,16 @@ def kvs_get(key):
         if key in store:
             #TODO: compare the client VC to the server VC
             if store[key].value == None:
-                response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
+                response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': json.dumps(clientDict)}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
             elif store[key].compare_to(clientVC) <= 0:
                 clientDict[key] = store[key].payload
-                response = make_response(jsonify({'result': 'Success', 'value': store[key].value, 'owner': Shard_Id, 'payload': clientDict}), 200)
+                response = make_response(jsonify({'result': 'Success', 'value': store[key].value, 'owner': Shard_Id, 'payload': json.dumps(clientDict)}), 200)
                 response.headers['Content-Type'] = 'application/json'
                 return response
             else:
-                response = make_response(jsonify({'result': 'Error', 'error': 'payload too old', 'payload': clientDict}), 404)
+                response = make_response(jsonify({'result': 'Error', 'error': 'payload too old', 'payload': json.dumps(clientDict)}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
                 
@@ -289,7 +293,7 @@ def kvs_get(key):
         else:
             # this is the shard that's supposed to own it.
             if shard_hash(key) == Shard_Id:    
-                response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
+                response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': json.dumps(clientDict}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
@@ -305,7 +309,7 @@ def kvs_get(key):
                         continue
 
                 # if all nodes in the partition are dead, return error
-                response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
+                response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': json.dumps(clientDict}), 400)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
@@ -326,7 +330,7 @@ def kvs_search(key):
         else:
             # check if this is the shard that's supposed to own it.
             if shard_hash(key) == Shard_Id:            
-                response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': clientDict}), 200)
+                response = make_response(jsonify({'result':'Success', 'isExists':False, 'payload': json.dumps(clientDict}), 200)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
@@ -336,13 +340,13 @@ def kvs_search(key):
                     url = 'http://' + node + '/keyValue-store/search/' + key
                     try:
                         # return whatever response was returned.                        
-                        r = requests.get(url, {'payload': clientDict}, timeout=.5)
+                        r = requests.get(url, {'payload': json.dumps(clientDict}, timeout=.5)
                         return (r.content, r.status_code, r.headers.items())
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
                 # if all nodes in the partition are dead, return error
-                response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
+                response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': json.dumps(clientDict}), 400)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
@@ -371,13 +375,13 @@ def kvs_put(key):
                 url = 'http://' + node + '/keyValue-store/' + key
                 try:
                     # forward return whatever response.                        
-                    r = requests.put(url, {'payload': clientDict, 'val': value}, timeout=.5)
+                    r = requests.put(url, {'payload': json.dumps(clientDict, 'val': value}, timeout=.5)
                     return (r.content, r.status_code, r.headers.items())
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     continue
 
             # if all the nodes in the partition are dead
-            response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
+            response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': json.dumps(clientDict}), 400)
             response.headers['Content-Type'] = 'application/json'
             return response
 
@@ -405,7 +409,7 @@ def kvs_put(key):
             store[key].timestamp = datetime.datetime.now()
             store[key].merge_VC(clientVC)
             clientDict[key] = store[key].payload
-            response = make_response(jsonify({'replaced':True, 'msg':'Updated successfully', 'payload': clientDict}), 201)
+            response = make_response(jsonify({'replaced':True, 'msg':'Updated successfully', 'payload': json.dumps(clientDict}), 201)
             response.headers['Content-Type'] = 'application/json'
             return response
 
@@ -417,7 +421,7 @@ def kvs_put(key):
             store[key] = Entry(value, entry_payload)
             clientDict[key] = entry_payload
 
-            response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': clientDict}), 200)
+            response = make_response(jsonify({'replaced': False, 'msg': 'Added successfully', 'payload': json.dumps(clientDict}), 200)
             response.headers['Content-Type'] = 'application/json'
             return response
 
@@ -445,13 +449,13 @@ def kvs_delete(key):
                 url = 'http://' + node + '/keyValue-store/' + key
                 try:
                     # forward return whatever response.                        
-                    r = requests.delete(url, data={'payload': clientDict}, timeout=.5)
+                    r = requests.delete(url, data={'payload': json.dumps(clientDict}, timeout=.5)
                     return (r.content, r.status_code, r.headers.items())
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     continue
             
             # if all nodes in the partition are dead
-            response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
+            response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': json.dumps(clientDict}), 400)
             response.headers['Content-Type'] = 'application/json'
             return response
 
@@ -545,9 +549,15 @@ def shard_rebalance_primary():
     for node in Shards[Shard_Id]:
         print('denoting', node, 'as secondary')
         # pull the store out of r and perform a comparison/update of our store with the other store
-        r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=0.5)
-        oth_store = r.json()['store']
-        compare_stores(oth_store)
+        tries = 0
+        while tries < 2:
+            try:
+                r = requests.get('http://' + node + '/shard/rebalance_secondary', timeout=0.3)
+                oth_store = r.json()['store']
+                compare_stores(oth_store)
+                break
+            except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                tries += 1
     
     #After I verify that I have everything from my shard friends... update membership of my store
     diff = shard_update_store()
@@ -556,11 +566,24 @@ def shard_rebalance_primary():
     for i, shard in enumerate(diff):
         # exclude all empty lists (no need to send no data) and my own Shard
         if len(shard) > 0:
-            r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=0.5)
+            tries = 0
+            while tries < 2:
+                try:
+                    r = requests.put('http://' + Shards[i][1] + '/shard/updateStore', timeout=0.3)
+                    break
+                except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                    tries += 1
     
     #After I update my store tell all the nodes in my shard to set their store to mine
     for node in Shards[Shard_Id]:
-        r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': json.dumps(Shards)}, timeout=.5)
+        tries = 0
+        while tries < 2:
+            try:
+                r = requests.put('http://' + node + '/shard/setStore', {'store':store_to_JSON(), 'shards': json.dumps(Shards)}, timeout=.3)
+                break
+            except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                tries += 1
+        
     # I'm finally done and can resume gossiping my data around
     do_gossip = True
     return
@@ -596,7 +619,6 @@ def shard_setStore():
     
     SHARD_COUNT = len(Shards)
     
-    #TODO: is this actually correct?
     store = JSON_to_store(newStore)
     do_gossip = True
     response = make_response("OK",200)
@@ -681,6 +703,7 @@ def shard_change_num():
     if not waiting:
         global SHARD_COUNT
         global Shards
+        global Shard_Id
         newshardNum = int(flask_request.values.get('num'))
         if newshardNum <= SHARD_COUNT:  
             print("decreasing shards...")
@@ -733,7 +756,7 @@ def shard_change_num():
                 Shard_Id = i
                 
         # broadcast to everyone else 
-        for shard_count, shard in enumerate(Shards):
+        for shard in Shards:
             #if shard_count != Shard_Id:
             print(Shards)
             print(json.dumps(Shards))
@@ -851,21 +874,46 @@ def view_delete():
             # first removethe node from the Shrards
             # This function returns True if we should continue as normal
             # returns False if we should use the rebalancing protocol
-            removeFromShards(new_node)
-
-            # broadcast to every node except this one
-            for node in VIEW - { IP_PORT }:
-                tries = 0
-                while (tries < 3):
-                    try:
-                        r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node, 'shard_view': json.dumps(Shards)}, timeout=0.5)
-                        if r.text == "OK":
-                            break
-                        else:
+            if removeFromShards(new_node):
+                # broadcast to every node except this one
+                for node in VIEW - { IP_PORT }:
+                    tries = 0
+                    while (tries < 3):
+                        try:
+                            r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node, 'shard_view': json.dumps(Shards)}, timeout=0.5)
+                            if r.text == "OK":
+                                break
+                            else:
+                                tries += 1
+                        except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                             tries += 1
-                    except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
-                        tries += 1
-                        continue
+                            continue
+            else:
+                # This is called if the number of shards has been reduced by 1
+                # removeFromShards already handled the movement of the nodes within the shard
+                for shard in Shards:
+                    tries = 0
+                    while tries < 3:
+                        try:
+                            print("trying to broadcast")                    
+                            requests.put('http://' + shard[0] + '/shard/rebalance_primary', {'shards': json.dumps(Shards)}, timeout=3)
+                            break
+                        except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                            tries += 1
+                
+                # broadcast the view change
+                for node in VIEW - { IP_PORT }:
+                    tries = 0
+                    while (tries < 3):
+                        try:
+                            r = requests.put('http://' + node + '/view/delete/ack', {'ip_port': new_node, 'shard_view': json.dumps(Shards)}, timeout=0.5)
+                            if r.text == "OK":
+                                break
+                            else:
+                                tries += 1
+                        except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
+                            tries += 1
+                            continue
 
             VIEW.remove(new_node)
 
