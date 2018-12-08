@@ -47,13 +47,10 @@ def addToShards(ip_port):
         ind += 1
     Shards[pos].append(ip_port)
 
-    #return pos
-
 #TODO: check for imbalances
 # 1. one shard has less than 2 nodes
 # Function: removes a node specified by ip_port
 def removeFromShards(ip_port):
-    #shard_id = i 
     # catches the case if there is 0 
     for i, shard in enumerate(Shards):
         if ip_port in shard:
@@ -163,11 +160,11 @@ class Entry:
             else:
                 secGreater = False
         return firstGreater, secGreater
+
     # Class Function: Takes takes 1 payload
     # returns 0 if payload is equal to current payload
     # returns 1 if payload is newer
     # returns -1 if payload is older                                                     
-
     def compare_to(self, new_payload):
         current_to_new = self.dict_compare_to(self.payload,new_payload)
         new_to_current = self.dict_compare_to(new_payload,self.payload)
@@ -208,7 +205,7 @@ class Entry:
             return -1 # our timestamp greater so we win
         return 1 # they win                            
 
-
+# formats our store properly so it can be sent with a message
 def store_to_JSON():
     json_store = store.copy()
     for key, entry in json_store.items():
@@ -228,6 +225,7 @@ def JSON_to_store(json_store):
         temp_store[key] = Entry(value['value'], value['payload'], value['timestamp'])
     return temp_store
 
+# takes in two stores and sets the value to be the most recent
 def compare_stores(other):
     if not other:
         other = {}
@@ -288,8 +286,7 @@ def kvs_get(key):
         # key doesn't exist, return error
         else:
             # this is the shard that's supposed to own it.
-            if shard_hash(key) == Shard_Id:
-                # print(str(shard_hash(key)) + ' ' + str(Shard_Id))          
+            if shard_hash(key) == Shard_Id:    
                 response = make_response(jsonify({'result':"Error", 'error':'Key does not exist', 'payload': clientDict}), 404)
                 response.headers['Content-Type'] = 'application/json'
                 return response
@@ -299,18 +296,18 @@ def kvs_get(key):
                 for node in Shards[shard_hash(key)]:
                     url = 'http://' + node + '/keyValue-store/' + key
                     try:
-                        # forward return whatever response.                        
+                        # return whatever response was returned.                        
                         r = requests.get(url, clientDict, timeout=.5)
                         return (r.content, r.status_code, r.headers.items())
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
-                # if all nodes in the partition are dead
+                # if all nodes in the partition are dead, return error
                 response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
-# Chercks whether the value exists
+# Checks whether the value exists
 @app.route('/keyValue-store/search/<key>', methods=['GET'])
 def kvs_search(key):
     if not waiting:
@@ -336,17 +333,18 @@ def kvs_search(key):
                 for node in Shards[shard_hash(key)]:
                     url = 'http://' + node + '/keyValue-store/search/' + key
                     try:
-                        # forward return whatever response.                        
+                        # return whatever response was returned.                        
                         r = requests.get(url, {'payload': clientDict}, timeout=.5)
                         return (r.content, r.status_code, r.headers.items())
                     except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                         continue
 
-                # if all nodes in the partition are dead
+                # if all nodes in the partition are dead, return error
                 response = make_response(jsonify({'result': 'Error', 'msg': 'Unable to access key ' + key, 'payload': clientDict}), 400)
                 response.headers['Content-Type'] = 'application/json'
                 return response
 
+# insert or update key
 @app.route('/keyValue-store/<key>', methods=['PUT'])
 def kvs_put(key):
     if not waiting:
@@ -421,6 +419,8 @@ def kvs_put(key):
             response.headers['Content-Type'] = 'application/json'
             return response
 
+
+# deletes a key
 @app.route('/keyValue-store/<key>', methods=['DELETE'])
 def kvs_delete(key):
     if not waiting:
@@ -470,6 +470,8 @@ def kvs_delete(key):
 #####################################################################
 ######################          Shard        ########################
 #####################################################################
+
+
 def shard_update_store():
     # Create a list of dictionaries, each dictionary refers to the data that will be transferred another Shard
     diff = [{} for _ in Shards]
@@ -486,6 +488,8 @@ def shard_update_store():
             del store[key]
     return diff
 
+# endpoint to receive initial shard information
+# from other nodes.
 @app.route('/shard/init_receive', methods=['GET'])
 def shard_init_receive():
     oth_ip_port = flask_request.values.get('ip_port')
@@ -591,6 +595,7 @@ def shard_updateStore():
     response.headers['Content-Type'] = 'application/text'
     return response
 
+# get the id of the shard that this node belongs to
 @app.route('/shard/my_id', methods=['GET'])
 def shard_get_id():
     if not waiting:
@@ -598,6 +603,7 @@ def shard_get_id():
         response.headers['Content-Type'] = 'application/json'
         return response
 
+# get a list of all shard id's
 @app.route('/shard/all_ids', methods=['GET'])
 def shard_get_all():
     if not waiting:
@@ -609,6 +615,7 @@ def shard_get_all():
         response.headers['Content-Type'] = 'application/json'
         return response        
 
+# get the members of a shard
 @app.route('/shard/members/<shard_id>', methods=['GET'])
 def shard_get_members(shard_id):
     if not waiting:
@@ -618,11 +625,13 @@ def shard_get_members(shard_id):
             response = make_response(jsonify({'result':'Error', 'msg': 'No shard with id ' + str(shard_id)}), 404)
             response.headers['Content-Type'] = 'application/json'
             return response            
-
-        response = make_response(jsonify({'result': 'Success', 'members': ','.join(Shards[shard_id])}), 200)
+        
+        members = ','.join(map(str, sorted(Shards[shard_id])))                                            
+        response = make_response(jsonify({'result': 'Success', 'members': members}), 200)
         response.headers['Content-Type'] = 'application/json'
         return response
 
+# get number of keys this shard is responsible for
 @app.route('/shard/count/<shard_id>', methods=['GET'])
 def shard_get_count(shard_id):
     if not waiting:
@@ -647,33 +656,44 @@ def shard_get_count(shard_id):
                 except(requests.HTTPError, requests.ConnectionError, requests.Timeout):
                     tries += 1
 
+# change the number of shards we should have; calling this
+# requires a rebalancing of nodes.
 @app.route('/shard/changeShardNumber', methods=['PUT'])
 def shard_change_num():
     if not waiting:
-        newshardNum = flask_request.values.get('num')
+        global SHARD_COUNT
+        global Shards
+        newshardNum = int(flask_request.values.get('num'))
         if newshardNum <= SHARD_COUNT:
-            #Then we are reducing the number of shards which won't cause errors
-            #will need to do some rebalancing
-            x=0
+            # Then we are reducing the number of shards which won't cause errors
+            # will need to do some rebalancing
+            x = 0
             deleted_shards_count = SHARD_COUNT - newshardNum
-            for i in range(0,deleted_shards_count): # iterates through shards to be destroyed
-                for node in reversed(Shards[i]): # destroys and adds nodes to new lists
-                    node = Shards[i].pop(0)
-                    Shards[x%newshardNum].append(node)
-                    x+=1
-                    # hash and add to shard at hashed
-            # TODO: Create a response
+            for i in range(0, deleted_shards_count): # iterates through shards to be destroyed
+                shard = Shards.pop(len(Shards)) # pops the last shard
+                for n in range(len(shard)): # iterates through nodes in shard
+                    node = shard.pop(i) 
+                    Shards[x%newshardNum].append(node) # round robin adds to non deleted lists
+                    x+=1                                                        
+            SHARD_COUNT = newshardNum
             ids = '0'
+
+            # create the list of shard ids for response
             for i in range(1, len(Shards)):
-                ids += ","+str(i) 
+                ids += "," + str(i)
+
             response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
-            return response    
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        
+        # if the number to change to is the same as what we have now,
+        # we don't need to do anything.
         elif newshardNum == SHARD_COUNT:
-            # TODO: Create a response 
             ids = "0"
             for i in range(1, len(Shards)):
-                ids += ","+str(i) 
+                ids += "," + str(i) 
             response = make_response(jsonify({'result': 'Success', 'shard_ids': ids}), 200)
+            response.headers['Content-Type'] = 'application/json'
             return response
         else:
             #Check for errors
@@ -687,7 +707,7 @@ def shard_change_num():
                 response = make_response(jsonify({'result': 'Error', 'msg': 'Not enough nodes. ' + str(newshardNum) + ' shards result in a nonfault tolerant shard'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
-            # TODO: add new Shard to Shards
+            
             for i in range(0,newshardNum-SHARD_COUNT):
                 Shards.append([])
             
@@ -701,12 +721,15 @@ def shard_change_num():
                 moveFromHighestToLowest()                                                                    
             #If we've gotten to this point then it's time to redistribute the nodes/data
             # we want to take from the highest and give to the lowest until all nodes are equal
-            # TODO: Create a response 
+            SHARD_COUNT = newshardNum
             ids = '0'
             for i in range(1, len(Shards)):
                 ids += ","+str(i) 
             response = make_response(jsonify({'result':'Success', 'shard_ids': ids}), 200)
-            return response                            
+            response.headers['Content-Type'] = 'application/json'
+            return response
+        
+                                    
 def moveFromHighestToLowest():
     # pop node from highest length shard
     # put in lowest length shard the new node
@@ -722,7 +745,8 @@ def moveFromHighestToLowest():
             nmax = len(shard)
             imax = i
     node = Shards[imax].pop(0)
-    Shards[imin].append(node)    
+    Shards[imin].append(node)
+
 # hash a key to its shard
 def shard_hash(value):
     m = hashlib.md5()
@@ -776,11 +800,7 @@ def view_put():
             # urls = []
             # for node in VIEW - {IP_PORT}:
             #     urls.append(node + 'view/updata/ack')                
-            # broadcast.put_broadcast(, .5)            
-
-            # first, add the new node to our view.
-            # then, find the partition with least number of nodes
-            # and add the node to that.
+            # broadcast.put_broadcast(, .5)
 
             response = make_response(jsonify({'result':"Success", 'msg':str('Successfully added ' + new_node + ' to view')}), 200)
             response.headers['Content-Type'] = 'application/json'
@@ -799,8 +819,6 @@ def view_delete():
             response.headers['Content-Type'] = 'application/json'
             return response
         else:
-            # need to be careful. what happens if the node
-            # being deleted still thinks that it's in the view?
 
             # first removethe node from the Shrards
             # This function returns True if we should continue as normal
@@ -822,7 +840,6 @@ def view_delete():
                         continue
 
             VIEW.remove(new_node)
-            #removeFromShards(new_node)
 
             response = make_response(jsonify({'result':"Success", 'msg':str('Successfully removed ' + new_node + ' from view')}), 200)
             response.headers['Content-Type'] = 'application/json'
@@ -847,11 +864,11 @@ def view_update_ack():
             VIEW.add(new_view)
 
         new_Shards = json.loads(flask_request.values.get('shard_view'))
-        print(new_Shards)
+        #print(new_Shards)
         if new_Shards:
             global Shards
             Shards = new_Shards
-            print('set Shards to', Shards)
+            #print('set Shards to', Shards)
         response = make_response("OK")
         response.headers['Content-Type'] = 'text/plain'
         return response
@@ -920,7 +937,7 @@ def all_empty(new_shards):
 if __name__ == "__main__":
     waiting = True
     while waiting:
-        print('looping init\n')
+        #print('looping init\n')
         waiting = False
         empty = True
         for server in VIEW - {IP_PORT}:     
@@ -928,9 +945,9 @@ if __name__ == "__main__":
             while tries < 3:
                 try:
                     r = requests.get('http://' + server + '/shard/init_receive', {"ip_port":IP_PORT}, timeout=2)
-                    print("requesting", server)
-                    print(r.status_code)
-                    print(r.text)
+                    #print("requesting", server)
+                    #print(r.status_code)
+                    #print(r.text)
                     if r.status_code == 400:
                         print('blocked on a server\n')
                         waiting = True
