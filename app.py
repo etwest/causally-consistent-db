@@ -120,10 +120,10 @@ class Gossip_thread(Thread):
     # TODO: Also pass IP_PORT with gossip, so can check if in view
 
     def run(self):
-        # gossip every 125 milliseconds
+        # gossip every 200 milliseconds
         while not self.stopped:
             if do_gossip:                        
-                time.sleep(.4)                                       # sleep for 400 milliseconds
+                time.sleep(.2)                                       # sleep for 200 milliseconds
                 temp_view = set(Shards[Shard_Id])
                 if len(temp_view) > 1:
                     temp_view.remove(IP_PORT)                    # remove self from view temporarily
@@ -704,13 +704,17 @@ def shard_change_num():
         global Shards
         global Shard_Id
         newshardNum = int(flask_request.values.get('num'))
+        if newshardNum <= 0:
+            response = make_response(jsonify({'result':'Error', 'msg': 'Cannot create 0 or negative shards'}), 400)
+            response.headers['Content-Type'] = 'application/json'
+            return response
         if newshardNum <= SHARD_COUNT:  
             # Then we are reducing the number of shards which won't cause errors
             # will need to do some rebalancing
             old_shards = []
             while len(Shards) > newshardNum:
                 old_shards.append(Shards.pop()) 
-                  
+
             for shard in old_shards:
                 for node in shard:
                     addToShards(node)     

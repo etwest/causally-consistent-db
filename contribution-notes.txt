@@ -1,0 +1,19 @@
+Eugene Chou (euchou):
+    wrote initialization function
+    debugged and fixed logical errors with functions
+    wrote shard endpoints
+
+Bryan Ji (bji): 
+    wrote key value store update and delete
+    wrote view update and delete
+    debugged and identified a stable hash function
+
+Evan West (etwest):
+    designed protocols
+    wrote rebalance primary/secondary
+    random other stuff
+
+Baiwen Huang (bhuang21):
+    wrote change shard number function
+    wrote remove from shard number
+    wrote move from highest to lowest    
