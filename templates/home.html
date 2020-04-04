@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+    </head>
+    <body>
+        Use this form to send queries and commands to the key value store.
+        <form id="query-form">
+            Query Type: <select id="q-type">
+                    <option value="KVS">KVS</option>
+                    <option value="SHARDS">SHARDS</option>
+                    <option value="NODES">NODES</option>
+                </select>
+            <br>
+            <div id="querying-key">
+                Operation: <select id="OP-key">
+                    <option value="GET">Perform Query Upon Key</option>
+                    <option value="PUT">Insert New Key Value Pair</option>
+                    <option value="SEARCH">Check if a Key Exists</option>
+                    <option value="DELETE">Delete a Key Value Pair</option>
+                </select>
+                <br>
+                Key: <input id="key" type="text">
+                <br>
+                <div id="value-wrap" hidden>Value: <input id="value" type="text"><br></div>
+            </div>
+            <div id="querying-shard" hidden>
+                Operation: <select id="OP-shard">
+                    <option value="MY_ID">Get Node's Shard ID</option>
+                    <option value="ALL_ID">List All Shard IDs</option>
+                    <option value="MEMBERS">Get Members of a Shard</option>
+                    <option value="COUNT">Number of Keys in a Shard</option>
+                    <option value="NUMBER">Change the Number of Shards</option>
+                </select>
+                <br>
+                <div id="id-wrap" hidden>Shard ID: <input id="shard-id" type="text">
+                <br></div>
+                <div id="num-wrap" hidden>New Number: <input id="shard-num" type="number">
+                <br></div>
+            </div>
+            <div id="querying-node" hidden>
+                Operation: <select id="OP-node">
+                    <option value="GET VIEW">Get the Whole View</option>
+                    <option value="ADD NODE">Add a New Node to the View</option>
+                    <option value="DELETE NODE">Delete a Node from the View</option>
+                </select>
+                <br>
+                <div id="ip-wrap" hidden>IP Port: <input id="ip-port" type="text">
+                <br></div>
+            </div>
+            Send to Node: <input id="node" type="number" list="nodes" min=0 max=10 required><br>
+            <input id="submit" type="submit" value="submit">
+        </form>
+        <br>Query Results: <br>
+        <div id="results" style="height:150px; overflow:scroll; width:75%; border-style:dotted; border-width:1px">
+        </div>
+    </body>
+    <script src="/static/javascript/send.js"></script>
+</html

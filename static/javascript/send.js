@@ -1,0 +1,216 @@
+var payload = "{}";
+
+
+function clearDiv() {
+  // large divs which wrap the options for each type
+  $("#querying-key").attr("hidden", true);
+  $("#querying-shard").attr("hidden", true);
+  $("#querying-node").attr("hidden", true);
+
+  // smaller arguments for specific operations
+  $("#value-wrap").attr("hidden", true);
+  $("#id-wrap").attr("hidden", true);
+  $("#num-wrap").attr("hidden", true);
+  $("#ip-wrap").attr("hidden", true);
+}
+
+$("#q-type").on("change", function() {
+  switch($("#q-type").val()) {
+    case "KVS":
+      clearDiv();
+      $("#querying-key").removeAttr("hidden");
+      break;
+    case "SHARDS":
+      clearDiv();
+      $("#querying-shard").removeAttr("hidden");
+      break;
+    case "NODES":
+      clearDiv();
+      $("#querying-node").removeAttr("hidden");
+      break;
+  }
+});
+
+$("#OP-key").on("change", function() {
+  switch($("#OP-key").val()) {
+    case "PUT":
+      $("#value-wrap").removeAttr("hidden");
+      break;
+    default:
+      $("#value-wrap").attr("hidden", true);
+      break;
+  }
+});
+
+$("#OP-shard").on("change", function() {
+  switch($("#OP-shard").val()) {
+    case "MEMBERS":
+    case "COUNT":
+      $("#id-wrap").removeAttr("hidden");
+      $("#num-wrap").attr("hidden", true);
+      break;
+    case "NUMBER":
+      $("#num-wrap").removeAttr("hidden");
+      $("#id-wrap").attr("hidden", true);
+      break;
+    default:
+      $("#id-wrap").attr("hidden", true);
+      $("#num-wrap").attr("hidden", true);
+      break;
+  }
+});
+
+$("#OP-node").on("change", function() {
+  switch($("#OP-node").val()) {
+    case "ADD NODE":
+      $("#ip-wrap").removeAttr("hidden");
+      break;
+    case "DELETE NODE":
+      $("#ip-wrap").removeAttr("hidden");
+      break;
+    default:
+      $("#ip-wrap").attr("hidden", true);
+      break;
+  }
+});
+
+// This sends the form information to the kvs endpoints
+$( "#query-form" ).submit(async function( event ) {
+  event.preventDefault();
+  var URI = "";
+  var DATA = {payload:payload};
+  var TYPE = "GET";
+
+  var query = "";
+
+  switch($("#q-type").val()) {
+    case "KVS":
+      key   = $("#key").val();
+      URI   = "/keyValue-store/" + key;
+      TYPE  = $("#OP-key").val();
+      query = "KEY - " + TYPE + " - " + key;
+      if (TYPE == "PUT") {
+        DATA["val"] = $("#value").val();
+        query += " - " + $("#value").val();
+      }
+      if (TYPE == "SEARCH") {
+        TYPE = "GET";
+        URI = "/keyValue-store/search/" + key;
+      }
+      break;
+    case "SHARDS":
+      query = "SHARD - " + $("#OP-shard").val();
+      switch($("#OP-shard").val()) {
+        case "MY_ID":
+          TYPE = "GET";
+          URI = "/shard/my_id";
+          break;
+        case "ALL_ID":
+          TYPE = "GET";
+          URI = "/shard/all_ids";
+          break;
+        case "MEMBERS":
+          TYPE = "GET";
+          id  = $("#shard-id").val();
+          query += " " + id;
+          URI = "/shard/members/" + id;
+          break;
+        case "COUNT":
+          TYPE = "GET";
+          id  = $("#shard-id").val();
+          query += " " + id;
+          URI = "/shard/count/" + id;
+          break;
+        case "NUMBER":
+          TYPE = "PUT";
+          num  = $("#shard-num").val()
+          query += " " + num;
+          URI = "/shard/changeShardNumber";
+          DATA["num"] = num;
+          break;
+      }
+      break;
+    case "NODES":
+        query = "NODES - " + $("#OP-node").val();
+        URI = "/view";
+        switch($("#OP-node").val()) {
+          case "GET VIEW":
+            TYPE = "GET";
+            break;
+          case "ADD NODE":
+            TYPE = "PUT";
+            DATA["ip_port"] = $("#ip-port").val();
+            query += " " + $("#ip-port").val()
+            break;
+          case "DELETE NODE":
+            TYPE = "DELETE";
+            DATA["ip_port"] = $("#ip-port").val();
+            query += " " + $("#ip-port").val()
+            break;
+        }
+      break;
+  }
+  // send to node 8080 + node number
+  PORT = 8080 + parseInt($("#node").val());
+  console.log(PORT);
+  URL = "http://localhost:" + PORT.toString(10) + URI;
+
+  console.log(URL);
+  console.log(TYPE);
+  console.log(DATA);
+  $.ajax({
+    url:  URL,
+    type: TYPE,
+    data: DATA,
+    dataType: "json",
+    success: function(result){
+      var results = document.getElementById("results");
+      var text;
+      // replace with just msg if that is present
+      if(result.hasOwnProperty("msg")) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " result: " + result["msg"]);
+      }
+      else if(result.hasOwnProperty("value")) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " value returned: " + result["value"]);
+      }
+      else if(result.hasOwnProperty("isExists")) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " value returned: " + result["isExists"]);
+      }
+      else {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " result: " + JSON.stringify(result));
+      }
+
+      results.appendChild(text);
+      results.innerHTML += "<br>";
+      console.log(result);
+      // scroll to the bottom the the results div
+      $("#results").scrollTop($("#results")[0].scrollHeight);
+      // set the payload to what was returned by the server
+      if (result.hasOwnProperty("payload")) {
+        payload = result["payload"];
+      }
+    },
+    error: function(error) {
+      var results = document.getElementById("results");
+      var text;
+      if (error["responseText"] == undefined) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " error: Could not contact node");
+      }
+      else if (error["responseJSON"].hasOwnProperty("error")) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " error: " + error["responseJSON"]["error"]);
+      }
+      else if (error["responseJSON"].hasOwnProperty("msg")) {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " error: " + error["responseJSON"]["msg"]);
+      }
+      else {
+        text      = document.createTextNode(query + " to node " + $("#node").val() + " error: " + error["responseText"]);
+      }
+      
+      results.appendChild(text);
+      results.innerHTML += "<br>";
+      // scroll to the bottom the the results div
+      $("#results").scrollTop($("#results")[0].scrollHeight);
+      console.log('Error', error);
+    }
+  })
+});

@@ -1,7 +1,10 @@
-from flask import Flask, json, make_response, jsonify
+from flask import Flask, json, make_response, jsonify, render_template
 from flask import request as flask_request
+from flask_cors import CORS
+
 from random import sample
 from threading import Thread
+import sqlite3 as SQL
 import json
 import os
 import requests
@@ -17,6 +20,7 @@ import broadcast
 
 
 app = Flask(__name__)
+CORS(app) # allow everything through cross-origin-resource-sharing
 
 # global variables
 MB = 1000000
@@ -25,11 +29,15 @@ VIEW = set(os.getenv('VIEW').split(','))
 SHARD_COUNT = int(os.getenv('S'))
 
 store = {}
-deleted_store = []
+# create an SQL database which we will use to store the data
+# This database is stored within docker's volume so that it
+# is persisted between restarts
+# SQLconn = SQL.connect('keyValue-store_' + IP_PORT + '.data')
+
 Shards = [[] for _ in range(SHARD_COUNT)]
 Shard_Id = None
 
-#Variable to control whether or not this node should be sending or accepting gossip requests
+# Variable to control whether or not this node should be sending or accepting gossip requests
 do_gossip = True
 
 waiting = False
@@ -59,7 +67,7 @@ def removeFromShards(ip_port):
         if ip_port in shard:
             shard_id = i
 
-    assert shard_id != -1, "we fucked up finding the shard_id"
+    assert shard_id != -1, "we couldn't find the shard_id"
 
     # If removing a shard will cause imbalance
     equalityCheck = len(Shards[shard_id]) < (len(VIEW) / SHARD_COUNT)
@@ -379,7 +387,7 @@ def kvs_put(key):
             response.headers['Content-Type'] = 'application/json'
             return response
 
-        # if empty payload
+        # if empty value
         if not value:
             response = make_response(jsonify({'result':'Error', 'msg':"Value is missing", 'payload':json.dumps(clientDict)}), 422)
             response.headers['Content-Type'] = 'application/json'
@@ -630,7 +638,7 @@ def shard_updateStore():
     newStore = flask_request.values.get('store')
     
     compare_stores(newStore)
-    response = make_response("OK",200)
+    response = make_response("OK", 200)
     response.headers['Content-Type'] = 'application/text'
     return response
 
@@ -642,11 +650,11 @@ def shard_get_id():
         response.headers['Content-Type'] = 'application/json'
         return response
 
-# get a list of all shard id's
+# get a list of all shard ids
 @app.route('/shard/all_ids', methods=['GET'])
 def shard_get_all():
     if not waiting:
-        # return all id's
+        # return all ids
         ids = "0"
         for i in range(1, len(Shards)):
             ids += ","+str(i)          
@@ -723,7 +731,7 @@ def shard_change_num():
         elif newshardNum > SHARD_COUNT:
             # Check for errors
             if newshardNum > len(VIEW):
-                response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(newshardNum)+'shards'}), 400) 
+                response = make_response(jsonify({'result':'Error', 'msg':'Not enough nodes for '+str(newshardNum)+' shards'}), 400) 
                 response.headers['Content-Type'] = 'application/json'
                 return response
             # we should have at least 2 nodes per shard to be fault tolerant
@@ -798,7 +806,7 @@ def moveFromHighestToLowest():
 def shard_hash(value):
     m = hashlib.md5()
     m.update(value.encode())
-    assert len(Shards) == SHARD_COUNT, "i really fucking like chips"
+    assert len(Shards) == SHARD_COUNT, "Error: length of shards not equal to shard count"
     return int(m.hexdigest(), 16) % len(Shards)
 
 #####################################################################
@@ -992,7 +1000,12 @@ def gossip():
             response.headers['Content-Type'] = 'application/json'
             return response
     
-
+#####################################################################
+######################          HTML        #########################
+#####################################################################
+@app.route('/', methods=["GET"])
+def home():
+    return render_template("home.html")
 
 #####################################################################
 ######################          MAIN        #########################
