@@ -4,6 +4,9 @@ This codebase creates a number of docker containers which each act as nodes with
 ## How to Run?
 Run the bash file `build.sh` to create the docker image and then create 5 containers running the app. Then a variety of http requests can be made to add key-value pairs, search, get, delete, etc.
 
+### Web Interface
+The project includes a web interface running on "/" at each of docker containers. This interface allows for the easy formation and delivery of http requests to the cluster.
+
 ## Files
 The most important file is `app.py` this file is the flask application which runs the http server. The other relevant files are `broadcast.py` and `Dockerfile` all the other files are notes or for testing.
 
