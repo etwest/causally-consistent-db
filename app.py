@@ -1005,7 +1005,7 @@ def gossip():
 #####################################################################
 @app.route('/', methods=["GET"])
 def home():
-    return render_template("home.html")
+    return render_template("home.html", shards=SHARD_COUNT-1, nodes=len(VIEW))
 
 #####################################################################
 ######################          MAIN        #########################

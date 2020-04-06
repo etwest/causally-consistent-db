@@ -1,5 +1,19 @@
 var payload = "{}";
 
+var nodes   = document.currentScript.getAttribute("nodes");
+var active_nodes = new Set();
+for(var i = 0; i < nodes; i++) {
+  active_nodes.add(i);
+}
+
+$("#node").on("change", function() {
+  var node = $("#node").val();
+  if (active_nodes.has(parseInt(node))) {
+    $("#node_error").attr("hidden", true);
+  } else {
+    $("#node_error").removeAttr("hidden");
+  }
+})
 
 function clearDiv() {
   // large divs which wrap the options for each type
@@ -7,7 +21,7 @@ function clearDiv() {
   $("#querying-shard").attr("hidden", true);
   $("#querying-node").attr("hidden", true);
 
-  // smaller arguments for specific operations
+  // inputs related to specific operations
   $("#value-wrap").attr("hidden", true);
   $("#id-wrap").attr("hidden", true);
   $("#num-wrap").attr("hidden", true);
@@ -64,6 +78,7 @@ $("#OP-node").on("change", function() {
   switch($("#OP-node").val()) {
     case "ADD NODE":
       $("#ip-wrap").removeAttr("hidden");
+      
       break;
     case "DELETE NODE":
       $("#ip-wrap").removeAttr("hidden");
@@ -139,25 +154,39 @@ $( "#query-form" ).submit(async function( event ) {
             break;
           case "ADD NODE":
             TYPE = "PUT";
-            DATA["ip_port"] = $("#ip-port").val();
-            query += " " + $("#ip-port").val()
+            var ip_port = $("#ip-port").val();
+            DATA["ip_port"] = ip_port;
+            query += " " + ip_port;
+
+            // calculate the node number
+            var ip = ip_port.split(":")[0];
+            var node_num = parseInt(ip.split(".")[3]) - 10;
+            // insert the new node to the list if not in the list
+            if (active_nodes.has(node_num)) {
+              console.log("This node is in the list already!");
+            }
+            else {
+              active_nodes.add(node_num);
+            }
             break;
           case "DELETE NODE":
             TYPE = "DELETE";
-            DATA["ip_port"] = $("#ip-port").val();
-            query += " " + $("#ip-port").val()
+            var ip_port = $("#ip-port").val();
+            DATA["ip_port"] = ip_port;
+            query += " " + ip_port;
+            // calculate the node number
+            var ip = ip_port.split(":")[0];
+            var node_num = parseInt(ip.split(".")[3]) - 10;
+            // delete the node from the list
+            active_nodes.delete(node_num);
             break;
         }
       break;
   }
   // send to node 8080 + node number
   PORT = 8080 + parseInt($("#node").val());
-  console.log(PORT);
   URL = "http://localhost:" + PORT.toString(10) + URI;
 
-  console.log(URL);
-  console.log(TYPE);
-  console.log(DATA);
   $.ajax({
     url:  URL,
     type: TYPE,
@@ -178,6 +207,9 @@ $( "#query-form" ).submit(async function( event ) {
       }
       else {
         text      = document.createTextNode(query + " to node " + $("#node").val() + " result: " + JSON.stringify(result));
+      }
+      if($("#q-type").val() == "SHARDS" && $("#OP-shard").val() == "NUMBER") {
+        $("#shard-id").attr("max", $("#shard-num").val() - 1)
       }
 
       results.appendChild(text);

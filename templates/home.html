@@ -33,9 +33,9 @@
                     <option value="NUMBER">Change the Number of Shards</option>
                 </select>
                 <br>
-                <div id="id-wrap" hidden>Shard ID: <input id="shard-id" type="text">
+                <div id="id-wrap" hidden>Shard ID: <input id="shard-id" type="number" value=0 min=0 max="{{shards}}">
                 <br></div>
-                <div id="num-wrap" hidden>New Number: <input id="shard-num" type="number">
+                <div id="num-wrap" hidden>New Number: <input id="shard-num" value=1 type="number" min=1>
                 <br></div>
             </div>
             <div id="querying-node" hidden>
@@ -48,12 +48,14 @@
                 <div id="ip-wrap" hidden>IP Port: <input id="ip-port" type="text">
                 <br></div>
             </div>
-            Send to Node: <input id="node" type="number" list="nodes" min=0 max=10 required><br>
+            Send to Node: <input id="node" type="number" list="nodes" value=0 min=0 required>
+            <span id="node_error" hidden><br><font color="red"><b>This node is not active, choose another.</b></font></span>
+            <br>
             <input id="submit" type="submit" value="submit">
         </form>
         <br>Query Results: <br>
         <div id="results" style="height:150px; overflow:scroll; width:75%; border-style:dotted; border-width:1px">
         </div>
     </body>
-    <script src="/static/javascript/send.js"></script>
-</html
+    <script src="/static/javascript/send.js" shards="{{shards}}" nodes="{{nodes}}"></script>
+</html>
