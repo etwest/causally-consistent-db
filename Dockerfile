@@ -1,3 +1,8 @@
+# Code Written by Evan West
+# With contributions from: Biawan Huang, Bryan Ji, and Eugene Chou
+# Publicly posted to github
+# https://github.com/etwest
+
 # Use an official Python runtime as a parent image
 FROM python:3.7-slim
 

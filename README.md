@@ -4,7 +4,10 @@ This codebase creates a number of docker containers which each act as nodes with
 ## How to Run?
 Run the bash file `build.sh` to create the docker image and then create 5 containers running the app. Then a variety of http requests can be made to add key-value pairs, search, get, delete, etc.
 
-### Web Interface
+#### Requirements
+- Install the appropriate Docker installation for your system. https://docs.docker.com/get-docker/
+
+## Web Interface
 The project includes a web interface running on "/" at each of the docker containers. This interface allows for the easy formation and delivery of http requests to the cluster.
 
 ## Files

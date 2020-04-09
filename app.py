@@ -1,3 +1,10 @@
+"""
+Code Written by Evan West
+With contributions from: Biawan Huang, Bryan Ji, and Eugene Chou
+Publicly posted to github
+https://github.com/etwest
+"""
+
 from flask import Flask, json, make_response, jsonify, render_template
 from flask import request as flask_request
 from flask_cors import CORS

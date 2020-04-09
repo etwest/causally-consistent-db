@@ -1,3 +1,11 @@
+/*
+Code Written by Evan West
+
+Publicly posted to github
+https://github.com/etwest
+*/
+
+
 var payload = "{}";
 
 var nodes   = document.currentScript.getAttribute("nodes");
